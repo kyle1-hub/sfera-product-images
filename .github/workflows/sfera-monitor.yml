@@ -1,4 +1,4 @@
-name: Sfera NUEVO Monitor
+name: Product New Monitor
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: sfera-nuevo-monitor
+  group: product-new-monitor
   cancel-in-progress: false
 
 jobs:
@@ -34,17 +34,17 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           PYTHONIOENCODING: utf-8
-        run: python sfera_monitor.py
+        run: python sfera_monitor.py --site all
 
       - name: Commit updated state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f state/sfera_products.sqlite3 || true
+          git add -f state/*.sqlite3 || true
           if git diff --cached --quiet; then
             echo "No state changes to commit."
           else
-            git commit -m "Update Sfera monitor state [skip ci]"
+            git commit -m "Update product monitor state [skip ci]"
             git push
           fi

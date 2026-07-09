@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import base64
 import hashlib
 import json
@@ -11,10 +11,11 @@ import time
 import zipfile
 from datetime import datetime
 from functools import lru_cache
+from html import unescape
 from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
@@ -22,6 +23,18 @@ from PIL import Image, ImageDraw, ImageFont
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
 EXAMPLE_CONFIG_PATH = Path(__file__).with_name("config.example.json")
+SITE_META = {
+    "sfera": {
+        "display_name": "Sfera",
+        "marker": "NUEVO",
+        "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
+    },
+    "bijou": {
+        "display_name": "Bijou Brigitte",
+        "marker": "Neu",
+        "base_url": "https://www.bijou-brigitte.com/neu/",
+    },
+}
 
 
 def load_config():
@@ -56,6 +69,11 @@ class Store:
             )
             """
         )
+        try:
+            self.conn.execute("ALTER TABLE products ADD COLUMN site TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
         self.conn.commit()
 
     def mark_seen(self, product):
@@ -66,7 +84,7 @@ class Store:
             self.conn.execute(
                 """
                 UPDATE products
-                SET name = ?, price = ?, url = ?, image_url = ?, category = ?, last_seen = ?, image_path = COALESCE(?, image_path)
+                SET name = ?, price = ?, url = ?, image_url = ?, category = ?, site = ?, last_seen = ?, image_path = COALESCE(?, image_path)
                 WHERE product_id = ?
                 """,
                 (
@@ -75,6 +93,7 @@ class Store:
                     product.get("url", ""),
                     product.get("image_url", ""),
                     product.get("category", ""),
+                    product.get("site", ""),
                     now,
                     product.get("image_path"),
                     product["product_id"],
@@ -83,8 +102,8 @@ class Store:
         else:
             self.conn.execute(
                 """
-                INSERT INTO products(product_id, name, price, url, image_url, category, first_seen, last_seen, image_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO products(product_id, name, price, url, image_url, category, site, first_seen, last_seen, image_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     product["product_id"],
@@ -93,6 +112,7 @@ class Store:
                     product.get("url", ""),
                     product.get("image_url", ""),
                     product.get("category", ""),
+                    product.get("site", ""),
                     now,
                     now,
                     product.get("image_path"),
@@ -129,12 +149,17 @@ def api_url(category_slug, page):
 
 
 def fetch_json(url, headers, retries=3):
+    return json.loads(fetch_text(url, headers, retries=retries))
+
+
+def fetch_text(url, headers, retries=3):
     last_error = None
     for attempt in range(1, retries + 1):
         try:
             req = Request(url, headers=headers)
             with urlopen(req, timeout=45) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                charset = resp.headers.get_content_charset() or "utf-8"
+                return resp.read().decode(charset, errors="ignore")
         except HTTPError as exc:
             last_error = exc
             if exc.code != 403 or attempt == retries:
@@ -194,6 +219,13 @@ def product_image_entries(color):
     return unique_image_entries(entries)
 
 
+def image_referer(image_source):
+    host = urlparse(image_source).netloc.lower()
+    if "bijou-brigitte.com" in host:
+        return "https://www.bijou-brigitte.com/"
+    return "https://www.sfera.com/"
+
+
 @lru_cache(maxsize=512)
 def has_white_background(image_source):
     if not image_source:
@@ -203,7 +235,7 @@ def has_white_background(image_source):
             image_source,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-                "Referer": "https://www.sfera.com/",
+                "Referer": image_referer(image_source),
                 "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
                 "Accept-Language": "es-ES,es;q=0.9",
             },
@@ -296,6 +328,7 @@ def product_price(item):
 def map_api_product(item, category_name, category_slug):
     name = normalize_text(item.get("name") or item.get("title") or "").upper()
     return {
+        "site": "sfera",
         "category": category_name,
         "name": name,
         "price": product_price(item),
@@ -343,7 +376,7 @@ def download_image(product, state_dir):
     return str(output)
 
 
-def scrape(config):
+def scrape_sfera(config):
     all_new_products = []
     for category in config["categories"]:
         category_name = category["name"] if isinstance(category, dict) else category
@@ -367,6 +400,166 @@ def scrape(config):
         print(f"[结果] {category_name}: 总商品 {len(category_products)} 个，NUEVO {len(new_products)} 个")
         all_new_products.extend(new_products)
     return all_new_products
+
+
+def bijou_headers():
+    return {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "de-DE,de;q=0.9,en;q=0.8",
+        "referer": "https://www.bijou-brigitte.com/",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    }
+
+
+def bijou_page_url(page):
+    base = "https://www.bijou-brigitte.com/neu/"
+    return base if page <= 1 else f"{base}?p={page}"
+
+
+def html_attr(fragment, name):
+    match = re.search(rf"{name}=[\"']([^\"']*)[\"']", fragment, re.I)
+    return unescape(match.group(1)).strip() if match else ""
+
+
+def strip_html(value):
+    return normalize_text(unescape(re.sub(r"<[^>]+>", " ", value or "")))
+
+
+def unique_urls(urls):
+    seen = set()
+    unique = []
+    for url in urls:
+        url = unescape(url or "").strip()
+        if not url:
+            continue
+        url = urljoin("https://www.bijou-brigitte.com/", url)
+        if url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
+
+
+def extract_bijou_total_pages(html):
+    pages = [1]
+    for match in re.finditer(r'[?&]p=(\d+)', html):
+        pages.append(int(match.group(1)))
+    return max(pages)
+
+
+def bijou_image_candidates_from_html(html, product_number=""):
+    urls = []
+    for match in re.finditer(r'<img\b[^>]*>', html, re.I | re.S):
+        tag = match.group(0)
+        if product_number and product_number not in tag:
+            continue
+        src = html_attr(tag, "src")
+        if "/media/" in src:
+            urls.append(src)
+        srcset = html_attr(tag, "srcset")
+        for part in srcset.split(","):
+            candidate = part.strip().split(" ")[0]
+            if "/media/" in candidate or "/thumbnail/" in candidate:
+                urls.append(candidate)
+    for match in re.finditer(r"https?://www\.bijou-brigitte\.com/(?:media|thumbnail)/[^\"'<>\s]+", html):
+        url = match.group(0)
+        if not product_number or product_number in url:
+            urls.append(url)
+    return unique_urls(urls)
+
+
+def bijou_detail_image_candidates(product_url, product_number):
+    if not product_url:
+        return []
+    try:
+        html = fetch_text(product_url, bijou_headers())
+    except Exception as exc:
+        print(f"[Bijou 图片详情页失败] {product_url}: {exc}")
+        return []
+    return bijou_image_candidates_from_html(html, product_number)
+
+
+def bijou_preferred_image(listing_candidates, product_url, product_number):
+    listing_candidates = unique_urls(listing_candidates)
+    if not listing_candidates:
+        return ""
+    first_source = listing_candidates[0]
+    if has_white_background(first_source):
+        return first_source
+    candidates = unique_urls(listing_candidates[1:] + bijou_detail_image_candidates(product_url, product_number))
+    for source in candidates:
+        if has_white_background(source):
+            return source
+    return first_source
+
+
+def refine_product_image(product):
+    if product.get("site") != "bijou":
+        return product
+    candidates = product.get("image_candidates") or [product.get("image_url")]
+    product["image_url"] = bijou_preferred_image(candidates, product.get("url", ""), product.get("source_id", "")) or product.get("image_url", "")
+    return product
+
+
+def extract_bijou_products(html):
+    products = []
+    chunks = re.split(r'<div\s+class="cms-listing-col[^>]*>', html, flags=re.I)
+    for chunk in chunks:
+        if "product-box" not in chunk:
+            continue
+        if not re.search(r'class="flag\s+new"[^>]*>\s*Neu\s*<', chunk, re.I):
+            continue
+        product_number = html_attr(chunk, "data-number")
+        name = html_attr(chunk, "data-name") or strip_html(re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S).group(1) if re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S) else "")
+        price_value = html_attr(chunk, "data-price")
+        price = f"{float(price_value):.2f} €".replace(".", ",") if re.fullmatch(r"\d+(?:\.\d+)?", price_value or "") else price_value
+        link_match = re.search(r"<a\b[^>]*href=[\"']([^\"']+)[\"']", chunk, re.I)
+        product_url_value = urljoin("https://www.bijou-brigitte.com/", unescape(link_match.group(1))) if link_match else "https://www.bijou-brigitte.com/neu/"
+        candidates = bijou_image_candidates_from_html(chunk, product_number)
+        fallback_id = product_id_for({"url": product_url_value, "name": name, "price": price})
+        products.append(
+            {
+                "site": "bijou",
+                "category": "Neu",
+                "name": normalize_text(name),
+                "price": price,
+                "url": product_url_value,
+                "image_url": candidates[0] if candidates else "",
+                "image_candidates": candidates,
+                "source_id": product_number,
+                "product_id": f"bijou:{product_number or fallback_id}",
+                "is_new": True,
+            }
+        )
+    return products
+
+
+def scrape_bijou(config):
+    headers = bijou_headers()
+    print("[抓取] Bijou Brigitte Neu")
+    first_html = fetch_text(bijou_page_url(1), headers)
+    total_pages = extract_bijou_total_pages(first_html)
+    products = extract_bijou_products(first_html)
+    print(f"[分页] Bijou Brigitte Neu: 1/{total_pages}，本页 {len(products)} 个")
+    for page in range(2, total_pages + 1):
+        html = fetch_text(bijou_page_url(page), headers)
+        page_products = extract_bijou_products(html)
+        print(f"[分页] Bijou Brigitte Neu: {page}/{total_pages}，本页 {len(page_products)} 个")
+        products.extend(page_products)
+        time.sleep(0.5)
+    unique = {}
+    for product in products:
+        unique[product["product_id"]] = product
+    products = list(unique.values())
+    print(f"[结果] Bijou Brigitte Neu: Neu {len(products)} 个")
+    return products
+
+
+def scrape_site(site_key, config):
+    if site_key == "sfera":
+        return scrape_sfera(config)
+    if site_key == "bijou":
+        return scrape_bijou(config)
+    raise ValueError(f"未知站点：{site_key}")
 
 
 def post_wecom(webhook, payload):
@@ -439,42 +632,43 @@ def save_product_image_as_jpg(product, target_dir, index):
     return output
 
 
-def build_product_zip_bundle(products, state_dir, site_url):
+def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
     today = datetime.now().strftime("%Y%m%d")
-    bundle_root = Path(state_dir) / "wecom_zips" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    site_slug = safe_filename(site_name, "site").replace(" ", "_")
+    bundle_root = Path(state_dir) / "wecom_zips" / f"{site_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     bundle_root.mkdir(parents=True, exist_ok=True)
     category_zips = []
     category_counts = []
     for category, category_products in group_by_category(products).items():
         count = len(category_products)
         category_name = safe_filename(category, "category")
-        category_dir = bundle_root / f"{category_name}_{count}款_NUEVO"
+        category_dir = bundle_root / f"{category_name}_{count}款_{marker}"
         category_dir.mkdir(parents=True, exist_ok=True)
         for index, product in enumerate(category_products, 1):
             try:
                 save_product_image_as_jpg(product, category_dir, index)
             except Exception as exc:
                 print(f"[图片保存失败] {product.get('name')}: {exc}")
-        category_zip = bundle_root / f"{category_name}_{count}款_NUEVO.zip"
+        category_zip = bundle_root / f"{category_name}_{count}款_{marker}.zip"
         with zipfile.ZipFile(category_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for image_path in sorted(category_dir.glob("*.jpg")):
                 zf.write(image_path, image_path.name)
         category_zips.append(category_zip)
         category_counts.append((category, count))
-    master_zip = bundle_root / f"Sfera_网站上新_{len(products)}款_{today}.zip"
+    master_zip = bundle_root / f"{site_slug}_网站上新_{len(products)}款_{today}.zip"
     with zipfile.ZipFile(master_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for category_zip in category_zips:
             zf.write(category_zip, category_zip.name)
     return master_zip, category_zips, category_counts
 
 
-def build_zip_bundle_message(products, category_counts, site_url):
+def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfera", marker="NUEVO"):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
-        "**Sfera 网站产品上新提醒**",
+        f"**{site_name} 网站产品上新提醒**",
         f"> 日期：{today}",
         f"> 网站：{site_url}",
-        f"> 本次 NUEVO 商品合计：{len(products)} 款",
+        f"> 本次 {marker} 商品合计：{len(products)} 款",
         "",
         "**按品类打包：**",
     ]
@@ -489,10 +683,10 @@ def build_zip_bundle_message(products, category_counts, site_url):
     return "\n".join(lines)
 
 
-def send_wecom_zip_bundle(webhook, products, state_dir, site_url):
-    master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url)
+def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
+    master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
     bundle_root = master_zip.parent
-    message = build_zip_bundle_message(products, category_counts, site_url)
+    message = build_zip_bundle_message(products, category_counts, site_url, site_name, marker)
     text_result = send_wecom(webhook, message)
     file_result = send_wecom_file(webhook, master_zip)
     if text_result.get("errcode") == 0 and file_result.get("errcode") == 0:
@@ -659,18 +853,18 @@ def send_wecom_news_with_uploaded_images(webhook, products, state_dir, title_pre
     return send_wecom_news(webhook, uploaded, title_prefix)
 
 
-def build_message(new_products, site_url="https://www.sfera.com/es/mujer/bisuteria/"):
+def build_message(new_products, site_url="https://www.sfera.com/es/mujer/bisuteria/", site_name="Sfera", marker="NUEVO"):
     today = datetime.now().strftime("%Y-%m-%d")
     if not new_products:
         return "\n".join(
             [
-                "**Sfera 网站产品上新提醒**",
+                f"**{site_name} 网站产品上新提醒**",
                 f"> 日期：{today}",
                 f"> 网站：{site_url}",
-                "> 今日没有新增 NUEVO 商品。",
+                f"> 今日没有新增 {marker} 商品。",
             ]
         )
-    lines = [f"Sfera 新品监控发现 <font color=\"warning\">{len(new_products)}</font> 个新品", f"> {today}", ""]
+    lines = [f"{site_name} 新品监控发现 <font color=\"warning\">{len(new_products)}</font> 个新品", f"> {today}", ""]
     for idx, p in enumerate(new_products[:20], 1):
         name = p.get("name") or "未识别名称"
         price = p.get("price") or "未识别价格"
@@ -782,52 +976,43 @@ def send_category_image_and_links(webhook, products, state_dir):
     return results
 
 
-def run(args):
-    config = load_config()
-    if args.test_wecom:
-        result = send_wecom(config["wecom_webhook"], "Sfera 新品监控：企业微信机器人测试消息发送成功。")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+def enabled_sites(config, selected):
+    available = config.get("enabled_sites") or ["sfera", "bijou"]
+    if selected != "all":
+        return [selected]
+    return [site for site in available if site in SITE_META]
 
-    store = Store(config["state_dir"])
-    products = scrape(config)
-    if args.test_news:
-        result = send_wecom_news(config["wecom_webhook"], products[:8], "Sfera 图文测试")
-        print(f"[企业微信图文测试] {json.dumps(result, ensure_ascii=False)}")
-        return 0
-    if args.test_image:
-        image_path = make_product_list_image(products[:8], config["state_dir"], "Sfera NUEVO 商品测试")
-        result = send_wecom_image(config["wecom_webhook"], image_path)
-        print(f"[企业微信图片测试] {json.dumps(result, ensure_ascii=False)}")
-        print(f"[测试图片] {image_path}")
-        return 0
-    if args.test_upload_news:
-        result = send_wecom_news_with_uploaded_images(config["wecom_webhook"], products[:8], config["state_dir"], "Sfera 上传图测试")
-        print(f"[企业微信上传图文测试] {json.dumps(result, ensure_ascii=False)}")
-        return 0
-    if args.test_batch:
-        results = send_batch_image_and_links(config["wecom_webhook"], products[:8], config["state_dir"])
-        print(f"[企业微信批量测试] {json.dumps(results, ensure_ascii=False)}")
-        return 0
-    if args.test_category_batch:
-        first_category = products[0].get("category") if products else "PENDIENTES"
-        sample = [product for product in products if product.get("category") == first_category][:8]
-        results = send_category_image_and_links(config["wecom_webhook"], sample, config["state_dir"])
-        print(f"[企业微信品类批量测试] {json.dumps(results, ensure_ascii=False)}")
-        return 0
+
+def site_config(config, site_key):
+    cfg = dict(config)
+    sites = config.get("sites") or {}
+    cfg.update(sites.get(site_key, {}))
+    return cfg
+
+
+def process_site(site_key, config, store, args):
+    meta = SITE_META[site_key]
+    cfg = site_config(config, site_key)
+    site_url = cfg.get("base_url") or meta["base_url"]
+    site_name = cfg.get("display_name") or meta["display_name"]
+    marker = cfg.get("marker") or meta["marker"]
+    products = scrape_site(site_key, cfg)
     new_products = []
     for product in products:
+        product.setdefault("site", site_key)
+        is_new_seen = store.mark_seen(product)
+        if args.force_new or is_new_seen:
+            new_products.append(product)
+    for product in new_products:
+        refine_product_image(product)
         if config.get("download_images", True):
             try:
                 product["image_path"] = download_image(product, config["state_dir"])
             except Exception as exc:
-                print(f"[图片下载失败] {product.get('name')}: {exc}")
-        is_new_seen = store.mark_seen(product)
-        if args.force_new or is_new_seen:
-            new_products.append(product)
-    snapshot_path = Path(config["state_dir"]) / f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                print(f"[图片下载失败] {site_name} {product.get('name')}: {exc}")
+    snapshot_path = Path(config["state_dir"]) / f"snapshot_{site_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     snapshot_path.write_text(json.dumps(products, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[汇总] NUEVO 商品 {len(products)} 个；本次新增 {len(new_products)} 个。")
+    print(f"[汇总] {site_name} {marker} 商品 {len(products)} 个；本次新增 {len(new_products)} 个。")
     print(f"[快照] {snapshot_path}")
     if args.send or new_products or config.get("send_empty_report", False):
         if new_products:
@@ -835,22 +1020,43 @@ def run(args):
                 config["wecom_webhook"],
                 new_products,
                 config["state_dir"],
-                config.get("base_url") or "https://www.sfera.com/es/mujer/bisuteria/",
+                site_url,
+                site_name,
+                marker,
             )
         else:
             result = send_wecom(
                 config["wecom_webhook"],
-                build_message(new_products, config.get("base_url") or "https://www.sfera.com/es/mujer/bisuteria/"),
+                build_message(new_products, site_url, site_name, marker),
             )
-        print(f"[企业微信] {json.dumps(result, ensure_ascii=False)}")
-    return 0
+        print(f"[企业微信] {site_name} {json.dumps(result, ensure_ascii=False)}")
+    return products, new_products
+
+
+def run(args):
+    config = load_config()
+    if args.test_wecom:
+        result = send_wecom(config["wecom_webhook"], "产品上新监控：企业微信机器人测试消息发送成功。")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    store = Store(config["state_dir"])
+    failures = []
+    for site_key in enabled_sites(config, args.site):
+        try:
+            process_site(site_key, config, store, args)
+        except Exception as exc:
+            failures.append((site_key, exc))
+            print(f"[错误] {SITE_META.get(site_key, {}).get('display_name', site_key)}: {exc}", file=sys.stderr)
+    return 1 if failures and len(failures) == len(enabled_sites(config, args.site)) else 0
 
 
 def main():
     parser = argparse.ArgumentParser(description="Sfera NUEVO product monitor")
     parser.add_argument("--test-wecom", action="store_true", help="send a WeCom test message only")
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
-    parser.add_argument("--force-new", action="store_true", help="treat all current NUEVO products as new for testing")
+    parser.add_argument("--force-new", action="store_true", help="treat all current NUEVO/Neu products as new for testing")
+    parser.add_argument("--site", choices=["sfera", "bijou", "all"], default="all", help="site to run")
     parser.add_argument("--test-news", action="store_true", help="send one WeCom news batch with the first 8 current NUEVO products")
     parser.add_argument("--test-image", action="store_true", help="send one generated product-list image with the first 8 current NUEVO products")
     parser.add_argument("--test-upload-news", action="store_true", help="upload product images to a temporary public host and send one WeCom news batch")

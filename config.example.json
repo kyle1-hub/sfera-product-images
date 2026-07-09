@@ -1,4 +1,24 @@
 {
+  "enabled_sites": ["sfera", "bijou"],
+  "sites": {
+    "sfera": {
+      "display_name": "Sfera",
+      "marker": "NUEVO",
+      "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
+      "categories": [
+        {"name": "PENDIENTES", "slug": "pendientes"},
+        {"name": "COLLARES Y CHOKERS", "slug": "collares-y-chokers"},
+        {"name": "ANILLOS", "slug": "anillos"},
+        {"name": "PULSERAS", "slug": "pulseras"},
+        {"name": "BROCHES", "slug": "broches"}
+      ]
+    },
+    "bijou": {
+      "display_name": "Bijou Brigitte",
+      "marker": "Neu",
+      "base_url": "https://www.bijou-brigitte.com/neu/"
+    }
+  },
   "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
   "categories": [
     {"name": "PENDIENTES", "slug": "pendientes"},
