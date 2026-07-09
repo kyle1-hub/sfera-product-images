@@ -1,21 +1,22 @@
-name: Sfera NUEVO Monitor
+name: Bijou Brigitte Neu Monitor
 
 on:
   schedule:
-    # GitHub Actions uses UTC. 01:00 UTC = 09:00 China time.
-    - cron: '0 1 * * *'
+    # GitHub Actions uses UTC. 01:10 UTC = 09:10 China time.
+    # Staggered after Sfera to reduce state commit conflicts.
+    - cron: '10 1 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: sfera-nuevo-monitor
+  group: bijou-brigitte-neu-monitor
   cancel-in-progress: false
 
 jobs:
-  sfera:
-    name: Sfera NUEVO
+  bijou:
+    name: Bijou Brigitte Neu
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -31,11 +32,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Sfera monitor
+      - name: Run Bijou Brigitte monitor
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           PYTHONIOENCODING: utf-8
-        run: python sfera_monitor.py --site sfera
+        run: python sfera_monitor.py --site bijou
 
       - name: Commit updated state
         if: always()
@@ -46,6 +47,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No state changes to commit."
           else
-            git commit -m "Update Sfera monitor state [skip ci]"
+            git commit -m "Update Bijou Brigitte monitor state [skip ci]"
             git push
           fi
