@@ -1,5 +1,5 @@
 {
-  "enabled_sites": ["sfera", "bijou"],
+  "enabled_sites": ["sfera", "bijou", "bershka"],
   "sites": {
     "sfera": {
       "display_name": "Sfera",
@@ -17,6 +17,27 @@
       "display_name": "Bijou Brigitte",
       "marker": "Neu",
       "base_url": "https://www.bijou-brigitte.com/neu/"
+    },
+    "bershka": {
+      "display_name": "Bershka",
+      "marker": "Newly appeared",
+      "base_url": "https://www.bershka.com/gb/",
+      "country": "gb",
+      "store_id": "44009506",
+      "catalog_id": "40259534",
+      "language_id": -1,
+      "categories": [
+        {
+          "name": "Accessories",
+          "url": "https://www.bershka.com/gb/women/clothes/bsk-teen/accessories-n5849.html",
+          "category_id": "1010836578"
+        },
+        {
+          "name": "Jewellery",
+          "url": "https://www.bershka.com/gb/women/sale/accessories/jewellery-c1010850244.html",
+          "category_id": "1010850244"
+        }
+      ]
     }
   },
   "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
