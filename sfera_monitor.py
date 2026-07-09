@@ -756,15 +756,16 @@ def fetch_bershka_products_array(product_ids, config, category_url):
         return []
     products = []
     headers = bershka_headers(category_url)
-    for start in range(0, len(product_ids), 50):
-        chunk = product_ids[start : start + 50]
+    for start in range(0, len(product_ids), 20):
+        chunk = product_ids[start : start + 20]
         product_ids_param = quote(",".join(chunk), safe=",")
         url = (
             f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
             f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
         )
-        payload = fetch_json(url, headers, retries=1)
+        payload = fetch_json(url, headers, retries=3)
         products.extend(payload.get("products") or extract_bershka_products_from_payload(payload))
+        time.sleep(1)
     return products
 
 
@@ -783,7 +784,7 @@ def fetch_bershka_category_products(category, config):
     for url in urls:
         try:
             print(f"[Bershka] 请求 {category_name}: {url}")
-            payload = fetch_json(url, headers, retries=1)
+            payload = fetch_json(url, headers, retries=3)
             products = extract_bershka_products_from_payload(payload)
             if products:
                 print(f"[Bershka] {category_name}: 直接解析商品 {len(products)} 个")
@@ -791,6 +792,7 @@ def fetch_bershka_category_products(category, config):
             product_ids = extract_bershka_commercial_ids(payload)
             if product_ids:
                 print(f"[Bershka] {category_name}: 解析到商品 ID {len(product_ids)} 个，继续请求 productsArray")
+                time.sleep(2)
                 products = fetch_bershka_products_array(product_ids, active_config, category_url)
                 if products:
                     print(f"[Bershka] {category_name}: productsArray 返回商品 {len(products)} 个")
