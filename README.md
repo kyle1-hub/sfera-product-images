@@ -1,4 +1,4 @@
-# Sfera NUEVO Monitor
+# Sfera Product Images / NUEVO Monitor
 
 每天抓取 Sfera 西班牙站女装饰品分类中的 NUEVO 商品，按品类下载产品图、生成压缩包，并通过企业微信机器人发送提醒。
 
@@ -73,10 +73,9 @@ Value: 企业微信机器人 webhook 完整地址
 
 ## 状态文件
 
-GitHub Actions 会提交这些状态文件：
+GitHub Actions 会提交这个状态文件：
 
 - `state/sfera_products.sqlite3`
-- `state/snapshot_*.json`
 
 其中 SQLite 文件用于记住已经发送过的商品，避免第二天重复发送同一批商品。
 
