@@ -700,7 +700,7 @@ def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfe
     lines.extend(
         [
             "",
-            "下面发送的是总压缩包，里面包含 5 个品类压缩包；每张图片已转换为标准 JPG，并以产品名称命名。",
+            "下面发送的是压缩包；如果总包超过企业微信大小限制，会按大类自动拆分发送。每张图片已转换为标准 JPG，并以产品名称命名。",
         ]
     )
     return "\n".join(lines)
@@ -720,8 +720,6 @@ def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfe
         shutil.rmtree(bundle_root, ignore_errors=True)
         master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker, max_products_per_zip=80)
         bundle_root = master_zip.parent
-        split_notice = send_wecom(webhook, f"**{site_name} 压缩包超过企业微信大小限制**\n> 已自动拆分为 {len(category_zips)} 个分包发送。")
-        sent_files.append({"path": "split_notice", "result": split_notice})
         for category_zip in category_zips:
             file_result = send_wecom_file(webhook, category_zip)
             sent_files.append({"path": str(category_zip), "result": file_result})
