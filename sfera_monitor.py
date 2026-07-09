@@ -500,6 +500,13 @@ def refine_product_image(product):
     return product
 
 
+def bijou_big_category(data_group):
+    top_group = (data_group or "").split(";")[0].strip().lower()
+    if top_group == "accessoires":
+        return "Neue Accessoires"
+    return "Neuer Schmuck"
+
+
 def extract_bijou_products(html):
     products = []
     chunks = re.split(r'<div\s+class="cms-listing-col[^>]*>', html, flags=re.I)
@@ -509,6 +516,7 @@ def extract_bijou_products(html):
         if not re.search(r'class="flag\s+new"[^>]*>\s*Neu\s*<', chunk, re.I):
             continue
         product_number = html_attr(chunk, "data-number")
+        data_group = html_attr(chunk, "data-group")
         name = html_attr(chunk, "data-name") or strip_html(re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S).group(1) if re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S) else "")
         price_value = html_attr(chunk, "data-price")
         price = f"{float(price_value):.2f} €".replace(".", ",") if re.fullmatch(r"\d+(?:\.\d+)?", price_value or "") else price_value
@@ -519,7 +527,7 @@ def extract_bijou_products(html):
         products.append(
             {
                 "site": "bijou",
-                "category": "Neu",
+                "category": bijou_big_category(data_group),
                 "name": normalize_text(name),
                 "price": price,
                 "url": product_url_value,
@@ -627,34 +635,49 @@ def save_product_image_as_jpg(product, target_dir, index):
     while output.exists():
         output = target_dir / f"{base}_{counter}.jpg"
         counter += 1
-    image = Image.open(source_path).convert("RGB")
-    image.save(output, format="JPEG", quality=92)
+    image = Image.open(source_path)
+    image.load()
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        image = image.convert("RGBA")
+        background = Image.new("RGBA", image.size, "white")
+        background.alpha_composite(image)
+        image = background.convert("RGB")
+    else:
+        image = image.convert("RGB")
+    image.save(output, format="JPEG", quality=95, subsampling=0)
     return output
 
 
-def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
+def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", marker="NUEVO", max_products_per_zip=None):
     today = datetime.now().strftime("%Y%m%d")
     site_slug = safe_filename(site_name, "site").replace(" ", "_")
     bundle_root = Path(state_dir) / "wecom_zips" / f"{site_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     bundle_root.mkdir(parents=True, exist_ok=True)
     category_zips = []
     category_counts = []
-    for category, category_products in group_by_category(products).items():
+    grouped = group_by_category(products)
+    for category, category_products in grouped.items():
         count = len(category_products)
-        category_name = safe_filename(category, "category")
-        category_dir = bundle_root / f"{category_name}_{count}款_{marker}"
-        category_dir.mkdir(parents=True, exist_ok=True)
-        for index, product in enumerate(category_products, 1):
-            try:
-                save_product_image_as_jpg(product, category_dir, index)
-            except Exception as exc:
-                print(f"[图片保存失败] {product.get('name')}: {exc}")
-        category_zip = bundle_root / f"{category_name}_{count}款_{marker}.zip"
-        with zipfile.ZipFile(category_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for image_path in sorted(category_dir.glob("*.jpg")):
-                zf.write(image_path, image_path.name)
-        category_zips.append(category_zip)
         category_counts.append((category, count))
+        category_name = safe_filename(category, "category")
+        chunks = [category_products]
+        if max_products_per_zip and count > max_products_per_zip:
+            chunks = [category_products[i : i + max_products_per_zip] for i in range(0, count, max_products_per_zip)]
+        for chunk_index, chunk_products in enumerate(chunks, 1):
+            suffix = f"_第{chunk_index}包" if len(chunks) > 1 else ""
+            chunk_count = len(chunk_products)
+            category_dir = bundle_root / f"{category_name}_{chunk_count}款_{marker}{suffix}"
+            category_dir.mkdir(parents=True, exist_ok=True)
+            for index, product in enumerate(chunk_products, 1):
+                try:
+                    save_product_image_as_jpg(product, category_dir, index)
+                except Exception as exc:
+                    print(f"[图片保存失败] {product.get('name')}: {exc}")
+            category_zip = bundle_root / f"{category_name}_{chunk_count}款_{marker}{suffix}.zip"
+            with zipfile.ZipFile(category_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for image_path in sorted(category_dir.glob("*.jpg")):
+                    zf.write(image_path, image_path.name)
+            category_zips.append(category_zip)
     master_zip = bundle_root / f"{site_slug}_网站上新_{len(products)}款_{today}.zip"
     with zipfile.ZipFile(master_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for category_zip in category_zips:
@@ -684,17 +707,31 @@ def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfe
 
 
 def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
+    max_bytes = 19 * 1024 * 1024
     master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
     bundle_root = master_zip.parent
     message = build_zip_bundle_message(products, category_counts, site_url, site_name, marker)
     text_result = send_wecom(webhook, message)
-    file_result = send_wecom_file(webhook, master_zip)
-    if text_result.get("errcode") == 0 and file_result.get("errcode") == 0:
+    sent_files = []
+    if master_zip.stat().st_size <= max_bytes:
+        file_result = send_wecom_file(webhook, master_zip)
+        sent_files.append({"path": str(master_zip), "result": file_result})
+    else:
+        shutil.rmtree(bundle_root, ignore_errors=True)
+        master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker, max_products_per_zip=80)
+        bundle_root = master_zip.parent
+        split_notice = send_wecom(webhook, f"**{site_name} 压缩包超过企业微信大小限制**\n> 已自动拆分为 {len(category_zips)} 个分包发送。")
+        sent_files.append({"path": "split_notice", "result": split_notice})
+        for category_zip in category_zips:
+            file_result = send_wecom_file(webhook, category_zip)
+            sent_files.append({"path": str(category_zip), "result": file_result})
+    ok = text_result.get("errcode") == 0 and all(item["result"].get("errcode") == 0 for item in sent_files)
+    if ok:
         shutil.rmtree(bundle_root, ignore_errors=True)
         cleanup = "deleted"
     else:
         cleanup = "kept"
-    return {"message": text_result, "file": file_result, "zip": str(master_zip), "cleanup": cleanup}
+    return {"message": text_result, "files": sent_files, "zip": str(master_zip), "cleanup": cleanup}
 
 
 def send_wecom_news(webhook, products, title_prefix="Sfera NUEVO"):
