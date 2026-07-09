@@ -1,0 +1,17 @@
+{
+  "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
+  "categories": [
+    {"name": "PENDIENTES", "slug": "pendientes"},
+    {"name": "COLLARES Y CHOKERS", "slug": "collares-y-chokers"},
+    {"name": "ANILLOS", "slug": "anillos"},
+    {"name": "PULSERAS", "slug": "pulseras"},
+    {"name": "BROCHES", "slug": "broches"}
+  ],
+  "wecom_webhook": "",
+  "headless": true,
+  "slow_mo_ms": 0,
+  "timeout_ms": 90000,
+  "state_dir": "state",
+  "download_images": true,
+  "send_empty_report": false
+}

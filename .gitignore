@@ -1,0 +1,15 @@
+config.json
+.env
+logs/
+
+# Runtime state. GitHub Actions force-adds only state/sfera_products.sqlite3.
+state/
+
+# Local/debug scripts and generated files.
+debug_*.py
+test_*.py
+run_sfera_monitor.ps1
+export_nuevo_images.py
+__pycache__/
+*.pyc
+.DS_Store
