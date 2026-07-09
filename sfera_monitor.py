@@ -758,9 +758,10 @@ def fetch_bershka_products_array(product_ids, config, category_url):
     headers = bershka_headers(category_url)
     for start in range(0, len(product_ids), 50):
         chunk = product_ids[start : start + 50]
+        product_ids_param = quote(",".join(chunk), safe=",")
         url = (
             f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
-            f"?languageId={quote(str(language_id))}&appId=1&productIds={quote(','.join(chunk))}"
+            f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
         )
         payload = fetch_json(url, headers, retries=1)
         products.extend(payload.get("products") or extract_bershka_products_from_payload(payload))
@@ -768,30 +769,38 @@ def fetch_bershka_products_array(product_ids, config, category_url):
 
 
 def fetch_bershka_category_products(category, config):
+    category_name = category.get("name") or category.get("category_id") or "unknown"
     category_url = category.get("url") or config.get("base_url") or "https://www.bershka.com/gb/"
     headers = bershka_headers(category_url)
     urls = bershka_api_urls(config, category)
+    active_config = config
     if not urls:
         discovered = discover_bershka_api_context(category_url, headers)
-        cfg = dict(config)
-        cfg.update({key: value for key, value in discovered.items() if key in ("store_id", "catalog_id", "language_id")})
-        urls = bershka_api_urls(cfg, category)
+        active_config = dict(config)
+        active_config.update({key: value for key, value in discovered.items() if key in ("store_id", "catalog_id", "language_id")})
+        urls = bershka_api_urls(active_config, category)
     errors = []
     for url in urls:
         try:
+            print(f"[Bershka] 请求 {category_name}: {url}")
             payload = fetch_json(url, headers, retries=1)
             products = extract_bershka_products_from_payload(payload)
             if products:
+                print(f"[Bershka] {category_name}: 直接解析商品 {len(products)} 个")
                 return products
             product_ids = extract_bershka_commercial_ids(payload)
             if product_ids:
-                products = fetch_bershka_products_array(product_ids, config, category_url)
+                print(f"[Bershka] {category_name}: 解析到商品 ID {len(product_ids)} 个，继续请求 productsArray")
+                products = fetch_bershka_products_array(product_ids, active_config, category_url)
                 if products:
+                    print(f"[Bershka] {category_name}: productsArray 返回商品 {len(products)} 个")
                     return products
-            errors.append(f"{url}: 返回 JSON 但未解析到商品")
+                errors.append(f"{url}: 解析到 {len(product_ids)} 个商品 ID，但 productsArray 未返回商品")
+                continue
+            errors.append(f"{url}: 返回 JSON 但未解析到商品或商品 ID")
         except Exception as exc:
             errors.append(f"{url}: {exc}")
-    raise RuntimeError("Bershka 分类抓取失败：" + "；".join(errors[-3:]))
+    raise RuntimeError("Bershka 分类抓取失败：" + "；".join(errors))
 
 
 def first_value(item, keys):
