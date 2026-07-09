@@ -659,10 +659,17 @@ def send_wecom_news_with_uploaded_images(webhook, products, state_dir, title_pre
     return send_wecom_news(webhook, uploaded, title_prefix)
 
 
-def build_message(new_products):
-    today = datetime.now().strftime("%Y-%m-%d %H:%M")
+def build_message(new_products, site_url="https://www.sfera.com/es/mujer/bisuteria/"):
+    today = datetime.now().strftime("%Y-%m-%d")
     if not new_products:
-        return f"Sfera 新品监控测试\n> {today}\n> 当前没有发现新的 NUEVO 商品。"
+        return "\n".join(
+            [
+                "**Sfera 网站产品上新提醒**",
+                f"> 日期：{today}",
+                f"> 网站：{site_url}",
+                "> 今日没有新增 NUEVO 商品。",
+            ]
+        )
     lines = [f"Sfera 新品监控发现 <font color=\"warning\">{len(new_products)}</font> 个新品", f"> {today}", ""]
     for idx, p in enumerate(new_products[:20], 1):
         name = p.get("name") or "未识别名称"
@@ -831,7 +838,10 @@ def run(args):
                 config.get("base_url") or "https://www.sfera.com/es/mujer/bisuteria/",
             )
         else:
-            result = send_wecom(config["wecom_webhook"], build_message(new_products))
+            result = send_wecom(
+                config["wecom_webhook"],
+                build_message(new_products, config.get("base_url") or "https://www.sfera.com/es/mujer/bisuteria/"),
+            )
         print(f"[企业微信] {json.dumps(result, ensure_ascii=False)}")
     return 0
 

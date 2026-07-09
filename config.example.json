@@ -13,5 +13,5 @@
   "timeout_ms": 90000,
   "state_dir": "state",
   "download_images": true,
-  "send_empty_report": false
+  "send_empty_report": true
 }
