@@ -1,9 +1,15 @@
 name: Sfera NUEVO Monitor
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'sfera_monitor.py'
+      - 'config.example.json'
+      - '.github/workflows/sfera-monitor.yml'
   schedule:
-    # GitHub Actions uses UTC. 01:00 UTC = 09:00 China time.
-    - cron: '0 1 * * *'
+    # GitHub Actions uses UTC. 01:07 UTC = 09:07 China time.
+    - cron: '7 1 * * *'
   workflow_dispatch:
 
 permissions:

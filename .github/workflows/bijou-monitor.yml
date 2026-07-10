@@ -1,10 +1,16 @@
 name: Bijou Brigitte Neu Monitor
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'sfera_monitor.py'
+      - 'config.example.json'
+      - '.github/workflows/bijou-monitor.yml'
   schedule:
-    # GitHub Actions uses UTC. 01:10 UTC = 09:10 China time.
+    # GitHub Actions uses UTC. 01:17 UTC = 09:17 China time.
     # Staggered after Sfera to reduce state commit conflicts.
-    - cron: '10 1 * * *'
+    - cron: '17 1 * * *'
   workflow_dispatch:
 
 permissions:

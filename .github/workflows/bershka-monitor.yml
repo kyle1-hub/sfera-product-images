@@ -1,10 +1,16 @@
 name: Bershka Daily Diff Monitor
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'sfera_monitor.py'
+      - 'config.example.json'
+      - '.github/workflows/bershka-monitor.yml'
   schedule:
-    # GitHub Actions uses UTC. 01:20 UTC = 09:20 China time.
+    # GitHub Actions uses UTC. 01:27 UTC = 09:27 China time.
     # Staggered after Sfera and Bijou to reduce state commit conflicts.
-    - cron: '20 1 * * *'
+    - cron: '27 1 * * *'
   workflow_dispatch:
 
 permissions:
