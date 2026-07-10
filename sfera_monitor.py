@@ -746,26 +746,46 @@ def extract_bershka_products_from_payload(payload):
     return products
 
 
+def fetch_bershka_products_array_chunk(chunk, config, category_url, headers):
+    store_id = config.get("store_id")
+    catalog_id = config.get("catalog_id")
+    language_id = config.get("language_id", -1)
+    product_ids_param = quote(",".join(chunk), safe=",")
+    url = (
+        f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
+        f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
+    )
+    try:
+        payload = fetch_json(url, headers, retries=3)
+        products = payload.get("products") or extract_bershka_products_from_payload(payload)
+        print(f"[Bershka] productsArray 批次 {len(chunk)} 个 ID 成功，返回 {len(products)} 个商品")
+        return products
+    except Exception as exc:
+        if len(chunk) == 1:
+            print(f"[Bershka] productsArray 单个 ID {chunk[0]} 失败，跳过：{exc}")
+            return []
+        mid = max(1, len(chunk) // 2)
+        print(f"[Bershka] productsArray 批次 {len(chunk)} 个 ID 失败，拆分重试：{exc}")
+        time.sleep(2)
+        return (
+            fetch_bershka_products_array_chunk(chunk[:mid], config, category_url, headers)
+            + fetch_bershka_products_array_chunk(chunk[mid:], config, category_url, headers)
+        )
+
+
 def fetch_bershka_products_array(product_ids, config, category_url):
     if not product_ids:
         return []
     store_id = config.get("store_id")
     catalog_id = config.get("catalog_id")
-    language_id = config.get("language_id", -1)
     if not store_id or not catalog_id:
         return []
     products = []
     headers = bershka_headers(category_url)
-    for start in range(0, len(product_ids), 20):
-        chunk = product_ids[start : start + 20]
-        product_ids_param = quote(",".join(chunk), safe=",")
-        url = (
-            f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
-            f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
-        )
-        payload = fetch_json(url, headers, retries=3)
-        products.extend(payload.get("products") or extract_bershka_products_from_payload(payload))
-        time.sleep(1)
+    for start in range(0, len(product_ids), 10):
+        chunk = product_ids[start : start + 10]
+        products.extend(fetch_bershka_products_array_chunk(chunk, config, category_url, headers))
+        time.sleep(2)
     return products
 
 
@@ -937,12 +957,16 @@ def scrape_bershka(config):
         category_url = category.get("url") if isinstance(category, dict) else config.get("base_url", "https://www.bershka.com/gb/")
         category_id = category.get("category_id") or extract_bershka_category_id(category_url) if isinstance(category, dict) else ""
         print(f"[抓取] Bershka {category_name} {category_id}")
-        raw_products = fetch_bershka_category_products(category if isinstance(category, dict) else {"name": category_name, "url": category_url}, config)
+        try:
+            raw_products = fetch_bershka_category_products(category if isinstance(category, dict) else {"name": category_name, "url": category_url}, config)
+        except Exception as exc:
+            print(f"[警告] Bershka {category_name} 本次抓取失败，跳过该分类：{exc}")
+            continue
         mapped = [map_bershka_product(item, category_name, category_url, config) for item in raw_products]
         mapped = [product for product in mapped if product.get("product_id") and (product.get("name") or product.get("image_url"))]
         print(f"[结果] Bershka {category_name}: 当前商品 {len(mapped)} 个")
         products.extend(mapped)
-        time.sleep(0.5)
+        time.sleep(2)
     unique = {}
     for product in products:
         unique[product["product_id"]] = product
