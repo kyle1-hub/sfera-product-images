@@ -39,6 +39,11 @@ SITE_META = {
         "marker": "Newly appeared",
         "base_url": "https://www.bershka.com/gb/",
     },
+    "lovisa": {
+        "display_name": "Lovisa",
+        "marker": "New",
+        "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1",
+    },
 }
 
 
@@ -230,6 +235,8 @@ def image_referer(image_source):
         return "https://www.bijou-brigitte.com/"
     if "bershka" in host or "inditex" in host:
         return "https://www.bershka.com/"
+    if "lovisa.com" in host or "shopify" in host:
+        return "https://www.lovisa.com/"
     return "https://www.sfera.com/"
 
 
@@ -522,6 +529,8 @@ def refine_product_image(product):
     if site == "bijou":
         product["image_url"] = bijou_preferred_image(candidates, product.get("url", ""), product.get("source_id", "")) or product.get("image_url", "")
     elif site == "bershka":
+        product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+    elif site == "lovisa":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     return product
 
@@ -973,6 +982,117 @@ def scrape_bershka(config):
     return list(unique.values())
 
 
+def lovisa_headers(referer=None):
+    return {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "referer": referer or "https://www.lovisa.com/collections/new-arrivals?page=1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    }
+
+
+def lovisa_products_json_url(base_url):
+    parsed = urlparse(base_url or "https://www.lovisa.com/collections/new-arrivals?page=1")
+    path = parsed.path.rstrip("/") or "/collections/new-arrivals"
+    query = parse_qs(parsed.query)
+    page = (query.get("page") or ["1"])[0]
+    return urljoin("https://www.lovisa.com/", f"{path}/products.json?limit=250&page={quote(str(page))}")
+
+
+def lovisa_category_from_name(name):
+    text = normalize_text(name).lower()
+    if "waterproof" in text:
+        return "不锈钢"
+    if "plated" in text:
+        return "真金"
+    if "cubic zirconia" in text:
+        return "CZ"
+    return "fashion"
+
+
+def lovisa_price(product):
+    variants = product.get("variants") or []
+    prices = []
+    for variant in variants:
+        value = variant.get("price") if isinstance(variant, dict) else None
+        try:
+            prices.append(float(value))
+        except (TypeError, ValueError):
+            pass
+    if prices:
+        return f"${min(prices):.2f}"
+    return ""
+
+
+def lovisa_absolute_image_url(value):
+    value = unescape(str(value or "")).strip()
+    if not value:
+        return ""
+    if value.startswith("//"):
+        return "https:" + value
+    if value.startswith("http"):
+        return value
+    return urljoin("https://www.lovisa.com/", value)
+
+
+def lovisa_image_candidates(product):
+    candidates = []
+    for image in product.get("images") or []:
+        if isinstance(image, dict):
+            value = image.get("src") or image.get("url") or image.get("image")
+        else:
+            value = image
+        source = lovisa_absolute_image_url(value)
+        if source:
+            candidates.append(source)
+    for variant in product.get("variants") or []:
+        image_id = variant.get("image_id") if isinstance(variant, dict) else None
+        for image in product.get("images") or []:
+            if isinstance(image, dict) and image_id and image.get("id") == image_id:
+                source = lovisa_absolute_image_url(image.get("src") or image.get("url"))
+                if source:
+                    candidates.insert(0, source)
+    return unique_site_urls(candidates, "https://www.lovisa.com/")
+
+
+def map_lovisa_product(product, base_url):
+    name = normalize_text(product.get("title") or product.get("name") or "")
+    handle = normalize_text(product.get("handle") or "")
+    product_id = str(product.get("id") or handle or "")
+    product_url_value = urljoin("https://www.lovisa.com/", f"/products/{handle}") if handle else (base_url or "https://www.lovisa.com/collections/new-arrivals?page=1")
+    candidates = lovisa_image_candidates(product)
+    fallback_id = product_id_for({"url": product_url_value, "name": name, "price": lovisa_price(product)})
+    return {
+        "site": "lovisa",
+        "category": lovisa_category_from_name(name),
+        "name": name,
+        "price": lovisa_price(product),
+        "url": product_url_value,
+        "image_url": candidates[0] if candidates else "",
+        "image_candidates": candidates,
+        "source_id": product_id or handle,
+        "product_id": f"lovisa:{product_id or handle or fallback_id}",
+        "is_new": True,
+    }
+
+
+def scrape_lovisa(config):
+    base_url = config.get("base_url") or "https://www.lovisa.com/collections/new-arrivals?page=1"
+    api_url_value = config.get("products_api_url") or lovisa_products_json_url(base_url)
+    payload = fetch_json(api_url_value, lovisa_headers(base_url), retries=3)
+    raw_products = payload.get("products") or []
+    products = [map_lovisa_product(product, base_url) for product in raw_products]
+    products = [product for product in products if product.get("product_id") and product.get("name") and product.get("image_url")]
+    unique = {}
+    for product in products:
+        unique[product["product_id"]] = product
+    products = list(unique.values())
+    counts = {category: len(items) for category, items in group_by_category(products).items()}
+    print(f"[结果] Lovisa New Arrivals: New {len(products)} 个；分类 {json.dumps(counts, ensure_ascii=False)}")
+    return products
+
+
+
 def scrape_site(site_key, config):
     if site_key == "sfera":
         return scrape_sfera(config)
@@ -980,6 +1100,8 @@ def scrape_site(site_key, config):
         return scrape_bijou(config)
     if site_key == "bershka":
         return scrape_bershka(config)
+    if site_key == "lovisa":
+        return scrape_lovisa(config)
     raise ValueError(f"未知站点：{site_key}")
 
 
@@ -1425,7 +1547,7 @@ def send_category_image_and_links(webhook, products, state_dir):
 
 
 def enabled_sites(config, selected):
-    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka"]
+    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka", "lovisa"]
     if selected != "all":
         return [selected]
     return [site for site in available if site in SITE_META]
@@ -1508,7 +1630,7 @@ def main():
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")
-    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "all"], default="all", help="site to run")
+    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "all"], default="all", help="site to run")
     parser.add_argument("--test-news", action="store_true", help="send one WeCom news batch with the first 8 current NUEVO products")
     parser.add_argument("--test-image", action="store_true", help="send one generated product-list image with the first 8 current NUEVO products")
     parser.add_argument("--test-upload-news", action="store_true", help="upload product images to a temporary public host and send one WeCom news batch")

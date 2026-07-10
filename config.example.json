@@ -1,5 +1,5 @@
 {
-  "enabled_sites": ["sfera", "bijou", "bershka"],
+  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa"],
   "sites": {
     "sfera": {
       "display_name": "Sfera",
@@ -38,6 +38,11 @@
           "category_id": "1010850244"
         }
       ]
+    },
+    "lovisa": {
+      "display_name": "Lovisa",
+      "marker": "New",
+      "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1"
     }
   },
   "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
