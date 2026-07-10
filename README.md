@@ -1,6 +1,6 @@
 # Product Images / New Monitor
 
-每天抓取 Sfera 西班牙站女装饰品 NUEVO 商品、Bijou Brigitte 的 Neu 页面商品、Bershka 两个饰品分类的每日新增商品，以及 Lovisa New Arrivals 商品，按品类下载产品图、生成压缩包，并通过企业微信机器人发送提醒。
+每天抓取 Sfera 西班牙站女装饰品 NUEVO 商品、Bijou Brigitte 的 Neu 页面商品、Bershka 两个饰品分类的每日新增商品、Lovisa New Arrivals 商品，以及 Stradivarius 五个饰品分类的每日新增商品，按品类下载产品图、生成压缩包，并通过企业微信机器人发送提醒。
 
 ## 功能
 
@@ -8,6 +8,7 @@
 - 监控 Bijou Brigitte：`https://www.bijou-brigitte.com/neu/` 页面下的 Neu 商品。
 - 监控 Bershka：Accessories 和 Jewellery 两个分类；由于没有上新标识，通过 SQLite 记录商品 ID，按“首次出现”判断新增。
 - 监控 Lovisa：`https://www.lovisa.com/collections/new-arrivals?page=1` New Arrivals 商品；按产品名关键词分为 `不锈钢`、`真金`、`CZ`、`fashion`。
+- 监控 Stradivarius：`https://www.stradivarius.com/gb/women/accessories/jewellery-n1883` 下的 `EARRINGS`、`NECKLACES`、`RINGS`、`BRACELETS`、`CHOKERS`；由于没有上新标识，通过 SQLite 记录商品 ID，按“首次出现”判断新增。
 - 本地 SQLite 记录已发送商品，避免重复推送。
 - 优先选择白底产品图；如果第一张已经是白底图，就保留第一张，否则继续找后面的白底图。
 - 按品类生成 zip，再打入一个总 zip。
@@ -64,13 +65,22 @@ python sfera_monitor.py --site bershka
 python sfera_monitor.py --site lovisa
 ```
 
+只运行 Stradivarius：
+
+```bash
+python sfera_monitor.py --site stradivarius
+```
+
 Lovisa 分类规则：产品名包含 `waterproof` 归入 `不锈钢`；否则包含 `plated` 归入 `真金`；否则包含 `Cubic Zirconia` 归入 `CZ`；剩余归入 `fashion`。多关键词同时出现时按上述优先级归类。
 
-Bershka / Lovisa 首次上线建议先建立基线，避免把当前所有商品都推送出去：
+Stradivarius 监控 `EARRINGS`、`NECKLACES`、`RINGS`、`BRACELETS`、`CHOKERS` 五个分类，按 SQLite 首次出现判断新增。
+
+Bershka / Lovisa / Stradivarius 首次上线建议先建立基线，避免把当前所有商品都推送出去：
 
 ```bash
 python sfera_monitor.py --site bershka --baseline-only
 python sfera_monitor.py --site lovisa --baseline-only
+python sfera_monitor.py --site stradivarius --baseline-only
 ```
 
 测试时强制把当前商品全部当成新品：
@@ -79,6 +89,7 @@ python sfera_monitor.py --site lovisa --baseline-only
 python sfera_monitor.py --site bijou --force-new
 python sfera_monitor.py --site bershka --force-new
 python sfera_monitor.py --site lovisa --force-new
+python sfera_monitor.py --site stradivarius --force-new
 ```
 
 ## GitHub Actions 定时运行
@@ -89,6 +100,7 @@ python sfera_monitor.py --site lovisa --force-new
 - `.github/workflows/bijou-monitor.yml`
 - `.github/workflows/bershka-monitor.yml`
 - `.github/workflows/lovisa-monitor.yml`
+- `.github/workflows/stradivarius-monitor.yml`
 
 默认定时：
 
@@ -97,6 +109,7 @@ Sfera：每天 01:07 UTC，也就是北京时间 09:07
 Bijou Brigitte：每天 01:17 UTC，也就是北京时间 09:17
 Bershka：每天 01:27 UTC，也就是北京时间 09:27
 Lovisa：每天 01:37 UTC，也就是北京时间 09:37
+Stradivarius：每天 01:47 UTC，也就是北京时间 09:47
 ```
 
 公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。
@@ -124,9 +137,9 @@ GitHub Actions 会提交这个状态文件：
 
 - `state/sfera_products.sqlite3`
 
-其中 SQLite 文件用于记住已经发送过的商品，避免第二天重复发送同一批商品。Bijou Brigitte 商品 ID 会使用 `bijou:` 前缀，Bershka 商品 ID 会使用 `bershka:` 前缀，Lovisa 商品 ID 会使用 `lovisa:` 前缀，避免和 Sfera 商品冲突。
+其中 SQLite 文件用于记住已经发送过的商品，避免第二天重复发送同一批商品。Bijou Brigitte 商品 ID 会使用 `bijou:` 前缀，Bershka 商品 ID 会使用 `bershka:` 前缀，Lovisa 商品 ID 会使用 `lovisa:` 前缀，Stradivarius 商品 ID 会使用 `stradivarius:` 前缀，避免和 Sfera 商品冲突。
 
-Bershka 没有明确的上新标签，所以第一次正常运行会把当前两个分类中的所有商品都视为新增。Lovisa 监控 New Arrivals 当前页商品，首次上线也建议先建立基线。生产上线前如需只建立基线，请先运行对应网站的 `--baseline-only` 并提交状态文件。
+Bershka 和 Stradivarius 没有明确的上新标签，所以第一次正常运行会把当前监控分类中的所有商品都视为新增。Lovisa 监控 New Arrivals 当前页商品，首次上线也建议先建立基线。生产上线前如需只建立基线，请先运行对应网站的 `--baseline-only` 并提交状态文件。
 
 ## 注意
 

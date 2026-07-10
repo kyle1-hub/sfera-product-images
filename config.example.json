@@ -1,5 +1,5 @@
 {
-  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa"],
+  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa", "stradivarius"],
   "sites": {
     "sfera": {
       "display_name": "Sfera",
@@ -43,6 +43,42 @@
       "display_name": "Lovisa",
       "marker": "New",
       "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1"
+    },
+    "stradivarius": {
+      "display_name": "Stradivarius",
+      "marker": "Newly appeared",
+      "base_url": "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883",
+      "country": "gb",
+      "store_id": "54009569",
+      "catalog_id": "50331064",
+      "language_id": -1,
+      "categories": [
+        {
+          "name": "EARRINGS",
+          "url": "https://www.stradivarius.com/gb/women/home-and-living/jewellery/earrings-n1902",
+          "category_id": "1718574"
+        },
+        {
+          "name": "NECKLACES",
+          "url": "https://www.stradivarius.com/gb/women/accessories/jewellery/necklaces-n1884",
+          "category_id": "1718570"
+        },
+        {
+          "name": "RINGS",
+          "url": "https://www.stradivarius.com/gb/women/home-and-living/jewellery/rings-n1901",
+          "category_id": "1718573"
+        },
+        {
+          "name": "BRACELETS",
+          "url": "https://www.stradivarius.com/gb/women/home-and-living/jewellery/bracelets-n1903",
+          "category_id": "1718572"
+        },
+        {
+          "name": "CHOKERS",
+          "url": "https://www.stradivarius.com/gb/women/accessories/fashion-jewellery/chokers-n3712",
+          "category_id": "1020466947"
+        }
+      ]
     }
   },
   "base_url": "https://www.sfera.com/es/mujer/bisuteria/",

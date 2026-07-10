@@ -1,0 +1,58 @@
+name: Stradivarius Daily Diff Monitor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sfera_monitor.py'
+      - 'config.example.json'
+      - '.github/workflows/stradivarius-monitor.yml'
+  schedule:
+    # GitHub Actions uses UTC. 01:47 UTC = 09:47 China time.
+    # Staggered after Sfera, Bijou, Bershka, and Lovisa to reduce state commit conflicts.
+    - cron: '47 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stradivarius-daily-diff-monitor
+  cancel-in-progress: false
+
+jobs:
+  stradivarius:
+    name: Stradivarius Daily Diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Stradivarius monitor
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          PYTHONIOENCODING: utf-8
+        run: python sfera_monitor.py --site stradivarius
+
+      - name: Commit updated state
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f state/*.sqlite3 || true
+          if git diff --cached --quiet; then
+            echo "No state changes to commit."
+          else
+            git commit -m "Update Stradivarius monitor state [skip ci]"
+            git push
+          fi

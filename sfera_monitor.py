@@ -44,6 +44,11 @@ SITE_META = {
         "marker": "New",
         "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1",
     },
+    "stradivarius": {
+        "display_name": "Stradivarius",
+        "marker": "Newly appeared",
+        "base_url": "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883",
+    },
 }
 
 
@@ -237,6 +242,8 @@ def image_referer(image_source):
         return "https://www.bershka.com/"
     if "lovisa.com" in host or "shopify" in host:
         return "https://www.lovisa.com/"
+    if "stradivarius" in host:
+        return "https://www.stradivarius.com/"
     return "https://www.sfera.com/"
 
 
@@ -531,6 +538,8 @@ def refine_product_image(product):
     elif site == "bershka":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     elif site == "lovisa":
+        product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+    elif site == "stradivarius":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     return product
 
@@ -1093,6 +1102,279 @@ def scrape_lovisa(config):
 
 
 
+def stradivarius_headers(referer=None):
+    return {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-GB,en;q=0.9",
+        "origin": "https://www.stradivarius.com",
+        "referer": referer or "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    }
+
+
+def extract_stradivarius_category_id(category_url):
+    match = re.search(r"[/-][nc](\d+)\b", category_url or "")
+    return match.group(1) if match else ""
+
+
+def stradivarius_products_array_url(store_id, catalog_id, category_id, language_id=-1, country="gb", version=3):
+    return (
+        f"https://www.stradivarius.com/itxrest/{version}/catalog/store/{store_id}/{catalog_id}/productsArray"
+        f"?categoryId={quote(str(category_id))}&languageId={quote(str(language_id))}&appId=1&country={quote(country)}"
+    )
+
+
+def stradivarius_api_urls(config, category):
+    explicit = category.get("api_url") or category.get("products_api_url")
+    if explicit:
+        return [explicit]
+    store_id = config.get("store_id")
+    catalog_id = config.get("catalog_id")
+    category_id = category.get("category_id") or extract_stradivarius_category_id(category.get("url", ""))
+    language_id = config.get("language_id", -1)
+    country = config.get("country", "gb")
+    if not store_id or not catalog_id or not category_id:
+        return []
+    urls = []
+    urls.append(
+        f"https://www.stradivarius.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/category/{category_id}/product"
+        f"?languageId={quote(str(language_id))}&appId=1&showProducts=false"
+    )
+    for version in (3,):
+        urls.append(stradivarius_products_array_url(store_id, catalog_id, category_id, language_id, country, version))
+        urls.append(
+            f"https://www.stradivarius.com/itxrest/{version}/catalog/store/{store_id}/{catalog_id}/category/{category_id}/product"
+            f"?languageId={quote(str(language_id))}&appId=1&country={quote(country)}"
+        )
+    return urls
+
+
+def fetch_stradivarius_page(category_url, headers):
+    html = fetch_text(category_url, headers, retries=1)
+    if "/_sec/verify?provider=interstitial" not in html or '"bm-verify"' not in html:
+        return html
+    try:
+        i = int(html.split("var i = ", 1)[1].split(";", 1)[0])
+        left = html.split('Number("', 1)[1].split('"', 1)[0]
+        right = html.split('+ "', 1)[1].split('"', 1)[0]
+        token = html.split('"bm-verify": "', 1)[1].split('"', 1)[0]
+        data = json.dumps({"bm-verify": token, "pow": i + int(left + right)}).encode("utf-8")
+        verify_req = Request(
+            "https://www.stradivarius.com/_sec/verify?provider=interstitial",
+            data=data,
+            headers={**headers, "Content-Type": "application/json", "Referer": category_url},
+            method="POST",
+        )
+        opener = urlopen(verify_req, timeout=30)
+        opener.read()
+        opener.close()
+        return fetch_text(category_url, headers, retries=1)
+    except Exception:
+        return html
+
+
+def discover_stradivarius_api_context(category_url, headers):
+    try:
+        html = fetch_stradivarius_page(category_url, headers)
+    except Exception as exc:
+        raise RuntimeError(f"Stradivarius 页面/API 参数自动发现失败，请在 config.json 配置 store_id/catalog_id：{exc}") from exc
+    context = {}
+    patterns = {
+        "store_id": r'["\']storeId["\']\s*[:=]\s*["\']?(\d+)',
+        "catalog_id": r'["\']catalogId["\']\s*[:=]\s*["\']?(\d+)',
+        "language_id": r'["\']languageId["\']\s*[:=]\s*["\']?(-?\d+)',
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, html, re.I)
+        if match:
+            context[key] = match.group(1)
+    if not context.get("store_id") or not context.get("catalog_id"):
+        raise RuntimeError("Stradivarius 页面未暴露完整 API 参数；请在 config.json 配置 store_id/catalog_id。")
+    return context
+
+
+def extract_stradivarius_commercial_ids(payload):
+    return extract_bershka_commercial_ids(payload)
+
+
+def extract_stradivarius_products_from_payload(payload):
+    return extract_bershka_products_from_payload(payload)
+
+
+def fetch_stradivarius_products_array_chunk(chunk, config, category_url, headers):
+    store_id = config.get("store_id")
+    catalog_id = config.get("catalog_id")
+    language_id = config.get("language_id", -1)
+    product_ids_param = quote(",".join(chunk), safe=",")
+    url = (
+        f"https://www.stradivarius.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
+        f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
+    )
+    try:
+        payload = fetch_json(url, headers, retries=3)
+        products = payload.get("products") or extract_stradivarius_products_from_payload(payload)
+        print(f"[Stradivarius] productsArray 批次 {len(chunk)} 个 ID 成功，返回 {len(products)} 个商品")
+        return products
+    except Exception as exc:
+        if len(chunk) == 1:
+            print(f"[Stradivarius] productsArray 单个 ID {chunk[0]} 失败，跳过：{exc}")
+            return []
+        mid = max(1, len(chunk) // 2)
+        print(f"[Stradivarius] productsArray 批次 {len(chunk)} 个 ID 失败，拆分重试：{exc}")
+        time.sleep(2)
+        return (
+            fetch_stradivarius_products_array_chunk(chunk[:mid], config, category_url, headers)
+            + fetch_stradivarius_products_array_chunk(chunk[mid:], config, category_url, headers)
+        )
+
+
+def fetch_stradivarius_products_array(product_ids, config, category_url):
+    if not product_ids:
+        return []
+    store_id = config.get("store_id")
+    catalog_id = config.get("catalog_id")
+    if not store_id or not catalog_id:
+        return []
+    products = []
+    headers = stradivarius_headers(category_url)
+    for start in range(0, len(product_ids), 10):
+        chunk = product_ids[start : start + 10]
+        products.extend(fetch_stradivarius_products_array_chunk(chunk, config, category_url, headers))
+        time.sleep(2)
+    return products
+
+
+def stradivarius_price(item):
+    return bershka_price(item).replace("£", "") if isinstance(bershka_price(item), str) and bershka_price(item).startswith("£") else bershka_price(item)
+
+
+def stradivarius_absolute_url(value, base_url="https://www.stradivarius.com/gb/"):
+    return bershka_absolute_url(value, base_url)
+
+
+def stradivarius_image_from_media(media):
+    return bershka_image_from_media(media)
+
+
+def stradivarius_image_candidates(item):
+    candidates = []
+    for key in ("image", "imageUrl", "mainImage", "thumbnail", "url"):
+        value = item.get(key) if isinstance(item, dict) else None
+        if isinstance(value, str) and re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)|/photos/|/assets/|/static/|/photos/", value, re.I):
+            candidates.append(stradivarius_absolute_url(value))
+        elif isinstance(value, dict):
+            candidate = stradivarius_image_from_media(value)
+            if candidate:
+                candidates.append(candidate)
+    for value in iter_nested(item):
+        if isinstance(value, dict):
+            candidate = stradivarius_image_from_media(value)
+            if candidate and re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)|/photos/|/assets/|/static/", candidate, re.I):
+                candidates.append(candidate)
+        elif isinstance(value, str) and re.search(r"https?://[^\s\"']+\.(?:jpg|jpeg|png|webp)(?:\?[^\s\"']*)?$", value, re.I):
+            candidates.append(value)
+    return unique_site_urls(candidates, "https://www.stradivarius.com/gb/")
+
+
+def stradivarius_product_url(item, category_url):
+    for key in ("productUrl", "detailUrl", "seoUrl", "url", "href"):
+        value = first_value(item, [key])
+        if isinstance(value, str) and value:
+            if re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)", value, re.I):
+                continue
+            return stradivarius_absolute_url(value, "https://www.stradivarius.com/gb/")
+    product_id = str(first_value(item, ["id", "productId", "product_id", "bundleProductId"]) or "")
+    if product_id:
+        return re.sub(r"\.html(?:\?.*)?$", f"p{product_id}.html", category_url)
+    return category_url
+
+
+def map_stradivarius_product(item, category_name, category_url, config):
+    source_id = str(first_value(item, ["id", "productId", "product_id", "bundleProductId"]) or "")
+    name = normalize_text(str(first_value(item, ["name", "title", "productName", "displayName", "nameEn"]) or find_first_nested(item, ["name", "title", "nameEn"]) or ""))
+    product_url_value = stradivarius_product_url(item, category_url)
+    if not source_id:
+        match = re.search(r"p(\d+)\.html", product_url_value)
+        source_id = match.group(1) if match else ""
+    fallback_id = product_id_for({"url": product_url_value, "category": category_name, "name": name, "price": stradivarius_price(item)})
+    candidates = stradivarius_image_candidates(item)
+    return {
+        "site": "stradivarius",
+        "category": category_name,
+        "name": name,
+        "price": stradivarius_price(item),
+        "url": product_url_value,
+        "image_url": candidates[0] if candidates else "",
+        "image_candidates": candidates,
+        "source_id": source_id,
+        "product_id": f"stradivarius:{source_id or fallback_id}",
+        "is_new": True,
+    }
+
+
+def fetch_stradivarius_category_products(category, config):
+    category_name = category.get("name") or category.get("category_id") or "unknown"
+    category_url = category.get("url") or config.get("base_url") or "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883"
+    headers = stradivarius_headers(category_url)
+    urls = stradivarius_api_urls(config, category)
+    active_config = config
+    if not urls:
+        discovered = discover_stradivarius_api_context(category_url, headers)
+        active_config = dict(config)
+        active_config.update({key: value for key, value in discovered.items() if key in ("store_id", "catalog_id", "language_id")})
+        urls = stradivarius_api_urls(active_config, category)
+    errors = []
+    for url in urls:
+        try:
+            print(f"[Stradivarius] 请求 {category_name}: {url}")
+            payload = fetch_json(url, headers, retries=3)
+            products = extract_stradivarius_products_from_payload(payload)
+            if products:
+                print(f"[Stradivarius] {category_name}: 直接解析商品 {len(products)} 个")
+                return products
+            product_ids = extract_stradivarius_commercial_ids(payload)
+            if product_ids:
+                print(f"[Stradivarius] {category_name}: 解析到商品 ID {len(product_ids)} 个，继续请求 productsArray")
+                time.sleep(2)
+                products = fetch_stradivarius_products_array(product_ids, active_config, category_url)
+                if products:
+                    print(f"[Stradivarius] {category_name}: productsArray 返回商品 {len(products)} 个")
+                    return products
+                errors.append(f"{url}: 解析到 {len(product_ids)} 个商品 ID，但 productsArray 未返回商品")
+                continue
+            errors.append(f"{url}: 返回 JSON 但未解析到商品或商品 ID")
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Stradivarius 分类抓取失败：" + "；".join(errors))
+
+
+def scrape_stradivarius(config):
+    products = []
+    categories = config.get("categories") or []
+    if not categories:
+        raise RuntimeError("Stradivarius 未配置 categories")
+    for category in categories:
+        category_name = category.get("name") if isinstance(category, dict) else str(category)
+        category_url = category.get("url") if isinstance(category, dict) else config.get("base_url", "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883")
+        category_id = category.get("category_id") or extract_stradivarius_category_id(category_url) if isinstance(category, dict) else ""
+        print(f"[抓取] Stradivarius {category_name} {category_id}")
+        try:
+            raw_products = fetch_stradivarius_category_products(category if isinstance(category, dict) else {"name": category_name, "url": category_url}, config)
+        except Exception as exc:
+            print(f"[警告] Stradivarius {category_name} 本次抓取失败，跳过该分类：{exc}")
+            continue
+        mapped = [map_stradivarius_product(item, category_name, category_url, config) for item in raw_products]
+        mapped = [product for product in mapped if product.get("product_id") and (product.get("name") or product.get("image_url"))]
+        print(f"[结果] Stradivarius {category_name}: 当前商品 {len(mapped)} 个")
+        products.extend(mapped)
+        time.sleep(2)
+    unique = {}
+    for product in products:
+        unique[product["product_id"]] = product
+    return list(unique.values())
+
+
+
 def scrape_site(site_key, config):
     if site_key == "sfera":
         return scrape_sfera(config)
@@ -1102,6 +1384,8 @@ def scrape_site(site_key, config):
         return scrape_bershka(config)
     if site_key == "lovisa":
         return scrape_lovisa(config)
+    if site_key == "stradivarius":
+        return scrape_stradivarius(config)
     raise ValueError(f"未知站点：{site_key}")
 
 
@@ -1547,7 +1831,7 @@ def send_category_image_and_links(webhook, products, state_dir):
 
 
 def enabled_sites(config, selected):
-    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka", "lovisa"]
+    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka", "lovisa", "stradivarius"]
     if selected != "all":
         return [selected]
     return [site for site in available if site in SITE_META]
@@ -1630,7 +1914,7 @@ def main():
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")
-    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "all"], default="all", help="site to run")
+    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "stradivarius", "all"], default="all", help="site to run")
     parser.add_argument("--test-news", action="store_true", help="send one WeCom news batch with the first 8 current NUEVO products")
     parser.add_argument("--test-image", action="store_true", help="send one generated product-list image with the first 8 current NUEVO products")
     parser.add_argument("--test-upload-news", action="store_true", help="upload product images to a temporary public host and send one WeCom news batch")
