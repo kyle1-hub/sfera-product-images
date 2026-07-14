@@ -1394,16 +1394,34 @@ def primark_profile_dir(config):
     return profile
 
 
+def primark_browser_channel(config):
+    channel = config.get("browser_channel")
+    if channel is not None:
+        channel = str(channel).strip()
+        return channel or None
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return None
+    return "chrome"
+
+
+def primark_launch_persistent_context(playwright, config, headless):
+    kwargs = {
+        "user_data_dir": str(primark_profile_dir(config)),
+        "headless": headless,
+        "locale": "en-US",
+        "viewport": {"width": 1440, "height": 1000},
+        "slow_mo": int(config.get("slow_mo_ms", 0) or 0),
+        "args": ["--disable-blink-features=AutomationControlled"],
+    }
+    channel = primark_browser_channel(config)
+    if channel:
+        kwargs["channel"] = channel
+    return playwright.chromium.launch_persistent_context(**kwargs)
+
+
 def primark_open_context(config):
-    return sync_playwright().start().chromium.launch_persistent_context(
-        user_data_dir=str(primark_profile_dir(config)),
-        channel="chrome",
-        headless=bool(config.get("headless", False)),
-        locale="en-US",
-        viewport={"width": 1440, "height": 1000},
-        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
-        args=["--disable-blink-features=AutomationControlled"],
-    )
+    playwright = sync_playwright().start()
+    return primark_launch_persistent_context(playwright, config, bool(config.get("headless", False)))
 
 
 def primark_headers(user_agent="", language="en-US", referer="https://www.primark.com/"):
@@ -1458,15 +1476,7 @@ def primark_backend_session(config, base_url):
     last_error = None
     for headless in modes:
         playwright = sync_playwright().start()
-        context = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(primark_profile_dir(config)),
-            channel="chrome",
-            headless=headless,
-            locale="en-US",
-            viewport={"width": 1440, "height": 1000},
-            slow_mo=int(config.get("slow_mo_ms", 0) or 0),
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        context = primark_launch_persistent_context(playwright, config, headless)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(base_url, wait_until="domcontentloaded", timeout=90000)
@@ -1721,15 +1731,7 @@ def primark_enrich_detail_images(config, products):
     if pending:
         print(f"[Primark] 列表首图非白底，补抓详情页 {len(pending)} 个")
     playwright = sync_playwright().start()
-    context = playwright.chromium.launch_persistent_context(
-        user_data_dir=str(primark_profile_dir(config)),
-        channel="chrome",
-        headless=bool(config.get("headless", False)),
-        locale="en-US",
-        viewport={"width": 1440, "height": 1000},
-        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
-        args=["--disable-blink-features=AutomationControlled"],
-    )
+    context = primark_launch_persistent_context(playwright, config, bool(config.get("headless", False)))
     try:
         for index, product in enumerate(pending, start=1):
             detail_candidates = primark_detail_image_candidates(context, product.get("url") or "")
@@ -1770,15 +1772,7 @@ def scrape_primark_via_browser(config):
     base_url = config.get("base_url") or "https://www.primark.com/en-us/c/women/accessories/jewelry"
     browser_headless = bool(config.get("browser_headless", config.get("headless", False)))
     playwright = sync_playwright().start()
-    context = playwright.chromium.launch_persistent_context(
-        user_data_dir=str(primark_profile_dir(config)),
-        channel="chrome",
-        headless=browser_headless,
-        locale="en-US",
-        viewport={"width": 1440, "height": 1000},
-        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
-        args=["--disable-blink-features=AutomationControlled"],
-    )
+    context = primark_launch_persistent_context(playwright, config, browser_headless)
     try:
         products_by_url = {}
         next_url = base_url

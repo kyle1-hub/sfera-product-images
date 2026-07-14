@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Playwright browsers
+        run: python -m playwright install chromium
+
       - name: Run Primark monitor
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
