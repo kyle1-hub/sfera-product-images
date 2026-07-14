@@ -1,6 +1,6 @@
 # Product Images / New Monitor
 
-每天抓取 Sfera 西班牙站女装饰品 NUEVO 商品、Bijou Brigitte 的 Neu 页面商品、Bershka 两个饰品分类的每日新增商品、Lovisa New Arrivals 商品，以及 Stradivarius 五个饰品分类的每日新增商品，按品类下载产品图、生成压缩包，并通过企业微信机器人发送提醒。
+每天抓取 Sfera 西班牙站女装饰品 NUEVO 商品、Bijou Brigitte 的 Neu 页面商品、Bershka 两个饰品分类的每日新增商品、Lovisa New Arrivals 商品、Stradivarius 五个饰品分类的每日新增商品，以及 Primark Jewelry 页面商品，按品类下载产品图、生成压缩包，并通过企业微信机器人发送提醒。
 
 ## 功能
 
@@ -9,6 +9,7 @@
 - 监控 Bershka：Accessories 和 Jewellery 两个分类；由于没有上新标识，通过 SQLite 记录商品 ID，按“首次出现”判断新增。
 - 监控 Lovisa：`https://www.lovisa.com/collections/new-arrivals?page=1` New Arrivals 商品；按产品名关键词分为 `不锈钢`、`真金`、`CZ`、`fashion`。
 - 监控 Stradivarius：`https://www.stradivarius.com/gb/women/accessories/jewellery-n1883` 下的 `EARRINGS`、`NECKLACES`、`RINGS`、`BRACELETS`、`CHOKERS`；由于没有上新标识，通过 SQLite 记录商品 ID，按“首次出现”判断新增。
+- 监控 Primark：`https://www.primark.com/en-us/c/women/accessories/jewelry` 页面下的全部商品；按单一分类 `JEWELRY` 处理，优先走后台抓取：通过浏览器完成 challenge 会话引导后，直接拉取 HTML 并解析页面内嵌商品数据；如果分页直拉仍被 challenge，则仅回退到“列表页浏览器抓取”方案，不再逐个打开商品详情页补图；当前仍先做本地测试，不接 GitHub。
 - 本地 SQLite 记录已发送商品，避免重复推送。
 - 优先选择白底产品图；如果第一张已经是白底图，就保留第一张，否则继续找后面的白底图。
 - 按品类生成 zip，再打入一个总 zip。
@@ -71,16 +72,25 @@ python sfera_monitor.py --site lovisa
 python sfera_monitor.py --site stradivarius
 ```
 
+只运行 Primark：
+
+```bash
+python sfera_monitor.py --site primark
+```
+
 Lovisa 分类规则：产品名包含 `waterproof` 归入 `不锈钢`；否则包含 `plated` 归入 `真金`；否则包含 `Cubic Zirconia` 归入 `CZ`；剩余归入 `fashion`。多关键词同时出现时按上述优先级归类。
 
 Stradivarius 监控 `EARRINGS`、`NECKLACES`、`RINGS`、`BRACELETS`、`CHOKERS` 五个分类，按 SQLite 首次出现判断新增。
 
-Bershka / Lovisa / Stradivarius 首次上线建议先建立基线，避免把当前所有商品都推送出去：
+Primark 监控该页面下全部商品，统一归入单一分类 `JEWELRY`；当前优先尝试“浏览器通过 challenge 建立会话 → Python 直拉分页 HTML → 提取 `ld+json` 商品数据”的后台化路径；若分页仍被 challenge，则仅回退到列表页浏览器抓取，不逐个打开详情页补图，本地企业微信测试优先。
+
+Bershka / Lovisa / Stradivarius / Primark 首次上线建议先建立基线，避免把当前所有商品都推送出去：
 
 ```bash
 python sfera_monitor.py --site bershka --baseline-only
 python sfera_monitor.py --site lovisa --baseline-only
 python sfera_monitor.py --site stradivarius --baseline-only
+python sfera_monitor.py --site primark --baseline-only
 ```
 
 测试时强制把当前商品全部当成新品：
@@ -90,6 +100,7 @@ python sfera_monitor.py --site bijou --force-new
 python sfera_monitor.py --site bershka --force-new
 python sfera_monitor.py --site lovisa --force-new
 python sfera_monitor.py --site stradivarius --force-new
+python sfera_monitor.py --site primark --force-new
 ```
 
 ## GitHub Actions 定时运行

@@ -1,5 +1,5 @@
 {
-  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa", "stradivarius"],
+  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa", "stradivarius", "primark"],
   "sites": {
     "sfera": {
       "display_name": "Sfera",
@@ -79,6 +79,18 @@
           "category_id": "1020466947"
         }
       ]
+    },
+    "primark": {
+      "display_name": "Primark",
+      "marker": "Newly appeared",
+      "base_url": "https://www.primark.com/en-us/c/women/accessories/jewelry",
+      "prefer_backend": true,
+      "fallback_to_browser": true,
+      "backend_headless": true,
+      "browser_headless": true,
+      "headless": false,
+      "slow_mo_ms": 0,
+      "max_scroll_rounds": 12
     }
   },
   "base_url": "https://www.sfera.com/es/mujer/bisuteria/",
