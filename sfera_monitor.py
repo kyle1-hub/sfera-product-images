@@ -5,7 +5,9 @@ import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
+import ssl
 import sys
 import time
 import zipfile
@@ -15,10 +17,11 @@ from html import unescape
 from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
@@ -48,6 +51,11 @@ SITE_META = {
         "display_name": "Stradivarius",
         "marker": "Newly appeared",
         "base_url": "https://www.stradivarius.com/gb/women/accessories/jewellery-n1883",
+    },
+    "primark": {
+        "display_name": "Primark",
+        "marker": "Newly appeared",
+        "base_url": "https://www.primark.com/en-us/c/women/accessories/jewelry",
     },
 }
 
@@ -244,6 +252,8 @@ def image_referer(image_source):
         return "https://www.lovisa.com/"
     if "stradivarius" in host:
         return "https://www.stradivarius.com/"
+    if "primark.com" in host or "amplience.net" in host:
+        return "https://www.primark.com/"
     return "https://www.sfera.com/"
 
 
@@ -540,6 +550,8 @@ def refine_product_image(product):
     elif site == "lovisa":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     elif site == "stradivarius":
+        product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+    elif site == "primark":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     return product
 
@@ -1375,6 +1387,450 @@ def scrape_stradivarius(config):
 
 
 
+def primark_profile_dir(config):
+    state_dir = Path(config.get("state_dir") or Path(__file__).with_name("state"))
+    profile = state_dir / "chrome_profile_primark"
+    profile.mkdir(parents=True, exist_ok=True)
+    return profile
+
+
+def primark_open_context(config):
+    return sync_playwright().start().chromium.launch_persistent_context(
+        user_data_dir=str(primark_profile_dir(config)),
+        channel="chrome",
+        headless=bool(config.get("headless", False)),
+        locale="en-US",
+        viewport={"width": 1440, "height": 1000},
+        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+
+
+def primark_headers(user_agent="", language="en-US", referer="https://www.primark.com/"):
+    return {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": f"{language},en;q=0.9",
+        "cache-control": "max-age=0",
+        "priority": "u=0, i",
+        "referer": referer,
+        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "user-agent": user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+    }
+
+
+def primark_cookie_header(cookies):
+    pairs = []
+    for cookie in cookies:
+        domain = (cookie.get("domain") or "").lower()
+        if "primark.com" not in domain:
+            continue
+        pairs.append(f"{cookie.get('name')}={cookie.get('value')}")
+    return "; ".join(pairs)
+
+
+def primark_backend_page_url(base_url, page_no):
+    if page_no <= 1:
+        return base_url
+    parsed = urlparse(base_url)
+    query = parse_qs(parsed.query)
+    query["page"] = [str(page_no)]
+    encoded = urlencode(query, doseq=True)
+    return parsed._replace(query=encoded).geturl()
+
+
+def primark_html_is_challenge(html_text):
+    text = (html_text or "").lower()
+    return "challenge validation" in text or "sec-cpt-if" in text or "provider=\"crypto\"" in text
+
+
+def primark_backend_session(config, base_url):
+    preferred_headless = bool(config.get("backend_headless", True))
+    modes = [preferred_headless]
+    if False not in modes:
+        modes.append(False)
+    last_error = None
+    for headless in modes:
+        playwright = sync_playwright().start()
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(primark_profile_dir(config)),
+            channel="chrome",
+            headless=headless,
+            locale="en-US",
+            viewport={"width": 1440, "height": 1000},
+            slow_mo=int(config.get("slow_mo_ms", 0) or 0),
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(base_url, wait_until="domcontentloaded", timeout=90000)
+            primark_wait_and_accept_cookies(page)
+            page.wait_for_timeout(6000)
+            html_text = page.content()
+            if primark_html_is_challenge(html_text):
+                raise RuntimeError(f"Primark backend session 页面仍返回 challenge（headless={headless}）")
+            if not primark_ldjson_products(html_text):
+                raise RuntimeError(f"Primark backend session 页面未提取到 ld+json 商品（headless={headless}）")
+            session = {
+                "cookies": primark_cookie_header(context.cookies()),
+                "user_agent": page.evaluate("() => navigator.userAgent"),
+                "language": page.evaluate("() => navigator.language") or "en-US",
+                "playwright": playwright,
+                "context": context,
+                "page": page,
+                "headless": headless,
+            }
+            print(f"[Primark][backend] 会话建立成功（headless={headless}）")
+            return session
+        except Exception as exc:
+            last_error = exc
+            print(f"[Primark][backend] 会话建立失败（headless={headless}）：{exc}")
+            context.close()
+            playwright.stop()
+    raise last_error or RuntimeError("Primark backend session 建立失败")
+
+
+def primark_close_backend_session(session):
+    page = session.get("page")
+    context = session.get("context")
+    playwright = session.get("playwright")
+    if page:
+        try:
+            page.close()
+        except Exception:
+            pass
+    if context:
+        context.close()
+    if playwright:
+        playwright.stop()
+
+
+def primark_fetch_html(url, session, referer):
+    headers = primark_headers(session.get("user_agent") or "", session.get("language") or "en-US", referer)
+    if session.get("cookies"):
+        headers["cookie"] = session["cookies"]
+    try:
+        html_text = fetch_text(url, headers, retries=2)
+        if primark_html_is_challenge(html_text):
+            raise RuntimeError("Primark backend HTML 返回 challenge")
+        return html_text
+    except Exception as exc:
+        page = session.get("page")
+        if not page:
+            raise
+        print(f"[Primark][backend] 直拉 HTML 失败，改用页面内 fetch 获取：{exc}")
+        html_text = page.evaluate(
+            """
+            async ({url, referer}) => {
+                const resp = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {
+                        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'x-primark-referer': referer || document.location.href,
+                    },
+                });
+                return await resp.text();
+            }
+            """,
+            {"url": url, "referer": referer},
+        )
+        if not primark_html_is_challenge(html_text):
+            return html_text
+        print("[Primark][backend] 页面内 fetch 仍返回 challenge，改用同页导航获取")
+        page.goto(url, wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_timeout(2000)
+        html_text = page.content()
+        if primark_html_is_challenge(html_text):
+            raise RuntimeError("Primark backend 同页导航后仍返回 challenge")
+        return html_text
+
+
+def primark_ldjson_products(html_text):
+    for match in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', html_text, re.I | re.S):
+        payload = normalize_text(match.group(1))
+        if "ItemList" not in payload:
+            continue
+        try:
+            data = json.loads(unescape(match.group(1)))
+        except Exception:
+            continue
+        items = data.get("itemListElement") or []
+        if items:
+            return items
+    return []
+
+
+def primark_products_from_html(html_text):
+    products = []
+    for row in primark_ldjson_products(html_text):
+        item = row.get("item") or {}
+        offers = item.get("offers") or {}
+        price = offers.get("price") or offers.get("lowPrice") or offers.get("highPrice") or ""
+        image = item.get("image") or ""
+        products.append(
+            {
+                "url": item.get("url") or "",
+                "name": normalize_text(item.get("name") or ""),
+                "price": f"${price}" if price and not str(price).startswith("$") else str(price or ""),
+                "image_url": image,
+                "image_candidates": [image] if image else [],
+                "source_id": item.get("sku") or "",
+            }
+        )
+    return products
+
+
+def scrape_primark_via_backend(config):
+    base_url = config.get("base_url") or "https://www.primark.com/en-us/c/women/accessories/jewelry"
+    session = primark_backend_session(config, base_url)
+    products_by_url = {}
+    try:
+        for page_no in range(1, int(config.get("max_scroll_rounds", 12) or 12) + 1):
+            page_url = primark_backend_page_url(base_url, page_no)
+            try:
+                html_text = primark_fetch_html(page_url, session, base_url)
+            except HTTPError as exc:
+                if exc.code == 404 and page_no > 1:
+                    print(f"[Primark][backend] 第 {page_no} 页返回 404，视为分页结束")
+                    break
+                raise
+            if primark_html_is_challenge(html_text):
+                raise RuntimeError(f"Primark backend 第 {page_no} 页返回 challenge")
+            raw_products = primark_products_from_html(html_text)
+            print(f"[Primark][backend] 第 {page_no} 页商品 {len(raw_products)} 个；累计 {len(products_by_url) + len([p for p in raw_products if p.get('url') and p.get('url') not in products_by_url])} 个")
+            if not raw_products:
+                if page_no == 1:
+                    raise RuntimeError("Primark backend HTML 未提取到商品")
+                break
+            added = 0
+            for product in raw_products:
+                if product.get("url") and product["url"] not in products_by_url:
+                    products_by_url[product["url"]] = product
+                    added += 1
+            if added == 0:
+                break
+        if not products_by_url:
+            raise RuntimeError("Primark backend HTML 未提取到商品")
+        mapped = [map_primark_product(product) for product in products_by_url.values()]
+        mapped = [product for product in mapped if product.get("product_id") and product.get("name") and product.get("image_url")]
+        print(f"[Primark][backend] 成功提取 {len(mapped)} 个商品")
+        return mapped
+    finally:
+        primark_close_backend_session(session)
+
+
+def primark_wait_and_accept_cookies(page):
+    page.wait_for_timeout(8000)
+    for text in ["ACCEPT ALL COOKIES", "Accept All Cookies", "ONLY REQUIRED COOKIES", "Only Required Cookies"]:
+        try:
+            btn = page.get_by_text(text, exact=False).first
+            if btn.count() and btn.is_visible(timeout=1000):
+                btn.click(timeout=3000)
+                page.wait_for_timeout(1500)
+                break
+        except Exception:
+            pass
+
+
+def primark_load_more_href(page):
+    try:
+        link = page.locator('a[data-testautomation-id="load-more-button"]').first
+        if link.count():
+            href = link.get_attribute("href")
+            if href:
+                return href
+    except Exception:
+        pass
+    return ""
+
+
+def primark_listing_products(page):
+    rows = page.locator('a[href*="/p/"]').evaluate_all(
+        r"""
+        els => {
+          const seen = new Set();
+          const rows = [];
+          for (const a of els) {
+            const href = a.href;
+            if (!href || seen.has(href)) continue;
+            seen.add(href);
+            const card = a.closest('article, li, div');
+            const img = (card ? card.querySelector('img') : a.querySelector('img'));
+            const text = (card ? (card.innerText || '') : (a.innerText || '')).replace(/\s+/g,' ').trim();
+            rows.push({
+              href,
+              title: (img && img.alt) ? img.alt.trim() : '',
+              text,
+              image: img ? (img.currentSrc || img.src || '') : '',
+            });
+          }
+          return rows;
+        }
+        """
+    )
+    products = []
+    for row in rows:
+        title = normalize_text(row.get("title") or "")
+        text = normalize_text(row.get("text") or "")
+        price_match = re.search(r"\$\d+(?:\.\d{2})?", text)
+        products.append(
+            {
+                "url": row.get("href") or "",
+                "name": title,
+                "price": price_match.group(0) if price_match else "",
+                "image_url": row.get("image") or "",
+                "image_candidates": [row.get("image")] if row.get("image") else [],
+            }
+        )
+    return products
+
+
+def primark_detail_image_candidates(context, product_url):
+    page = context.new_page()
+    try:
+        page.goto(product_url, wait_until="domcontentloaded", timeout=90000)
+        primark_wait_and_accept_cookies(page)
+        candidates = page.locator("img").evaluate_all(
+            r"""
+            els => els
+              .map(e => ({src: e.currentSrc || e.src || '', alt: e.alt || '', w: e.naturalWidth || 0, h: e.naturalHeight || 0}))
+              .filter(x => x.src && x.alt && x.w >= 300 && x.h >= 300)
+              .map(x => x.src)
+            """
+        )
+        return unique_site_urls(candidates, "https://www.primark.com/")
+    except Exception:
+        return []
+    finally:
+        page.close()
+
+
+def primark_image_candidates(product):
+    return unique_site_urls(product.get("image_candidates") or [product.get("image_url")], "https://www.primark.com/")
+
+
+def primark_enrich_detail_images(config, products):
+    pending = [product for product in products if not has_white_background(product.get("image_url") or "")]
+    if pending:
+        print(f"[Primark] 列表首图非白底，补抓详情页 {len(pending)} 个")
+    playwright = sync_playwright().start()
+    context = playwright.chromium.launch_persistent_context(
+        user_data_dir=str(primark_profile_dir(config)),
+        channel="chrome",
+        headless=bool(config.get("headless", False)),
+        locale="en-US",
+        viewport={"width": 1440, "height": 1000},
+        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    try:
+        for index, product in enumerate(pending, start=1):
+            detail_candidates = primark_detail_image_candidates(context, product.get("url") or "")
+            if detail_candidates:
+                combined = unique_site_urls((product.get("image_candidates") or []) + detail_candidates, "https://www.primark.com/")
+                product["image_candidates"] = combined
+                product["image_url"] = combined[0]
+            print(f"[Primark] 详情补图 {index}/{len(pending)}")
+            time.sleep(1)
+    finally:
+        context.close()
+        playwright.stop()
+    return products
+
+
+def map_primark_product(product):
+    name = normalize_text(product.get("name") or "")
+    product_url_value = product.get("url") or "https://www.primark.com/en-us/c/women/accessories/jewelry"
+    match = re.search(r"-(\d+)$", urlparse(product_url_value).path.rstrip("/"))
+    source_id = match.group(1) if match else ""
+    fallback_id = product_id_for({"url": product_url_value, "name": name, "price": product.get("price") or ""})
+    candidates = primark_image_candidates(product)
+    return {
+        "site": "primark",
+        "category": "JEWELRY",
+        "name": name,
+        "price": product.get("price") or "",
+        "url": product_url_value,
+        "image_url": candidates[0] if candidates else (product.get("image_url") or ""),
+        "image_candidates": candidates,
+        "source_id": source_id,
+        "product_id": f"primark:{source_id or fallback_id}",
+        "is_new": True,
+    }
+
+
+def scrape_primark_via_browser(config):
+    base_url = config.get("base_url") or "https://www.primark.com/en-us/c/women/accessories/jewelry"
+    browser_headless = bool(config.get("browser_headless", config.get("headless", False)))
+    playwright = sync_playwright().start()
+    context = playwright.chromium.launch_persistent_context(
+        user_data_dir=str(primark_profile_dir(config)),
+        channel="chrome",
+        headless=browser_headless,
+        locale="en-US",
+        viewport={"width": 1440, "height": 1000},
+        slow_mo=int(config.get("slow_mo_ms", 0) or 0),
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    try:
+        products_by_url = {}
+        next_url = base_url
+        page_no = 1
+        while next_url:
+            page = context.pages[0] if page_no == 1 and context.pages else context.new_page()
+            page.goto(next_url, wait_until="domcontentloaded", timeout=90000)
+            primark_wait_and_accept_cookies(page)
+            page.wait_for_timeout(2000)
+            raw_products = primark_listing_products(page)
+            for product in raw_products:
+                if product.get("url"):
+                    products_by_url[product["url"]] = product
+            print(f"[Primark][browser] 第 {page_no} 页商品 {len(raw_products)} 个；累计 {len(products_by_url)} 个")
+            href = primark_load_more_href(page)
+            next_url = urljoin("https://www.primark.com/", href) if href else ""
+            if page_no > 1:
+                page.close()
+            page_no += 1
+            if page_no > int(config.get("max_scroll_rounds", 12) or 12):
+                break
+        mapped = [map_primark_product(product) for product in products_by_url.values()]
+        mapped = [product for product in mapped if product.get("product_id") and product.get("name") and product.get("image_url")]
+        unique = {}
+        for product in mapped:
+            unique[product["product_id"]] = product
+        products = list(unique.values())
+        print(f"[Primark][browser] 成功提取 {len(products)} 个商品")
+        return products
+    finally:
+        context.close()
+        playwright.stop()
+
+
+def scrape_primark(config):
+    prefer_backend = config.get("prefer_backend", True)
+    fallback_to_browser = config.get("fallback_to_browser", False)
+    if prefer_backend:
+        try:
+            products = scrape_primark_via_backend(config)
+            print(f"[结果] Primark Jewelry: 当前商品 {len(products)} 个（backend）")
+            return products
+        except Exception as exc:
+            if not fallback_to_browser:
+                raise RuntimeError(f"Primark backend 抓取失败：{exc}") from exc
+            print(f"[Primark][backend] 失败，回退到列表页浏览器方案：{exc}")
+    products = scrape_primark_via_browser(config)
+    print(f"[结果] Primark Jewelry: 当前商品 {len(products)} 个（browser-listing-only）")
+    return products
+
+
+
 def scrape_site(site_key, config):
     if site_key == "sfera":
         return scrape_sfera(config)
@@ -1386,14 +1842,31 @@ def scrape_site(site_key, config):
         return scrape_lovisa(config)
     if site_key == "stradivarius":
         return scrape_stradivarius(config)
+    if site_key == "primark":
+        return scrape_primark(config)
     raise ValueError(f"未知站点：{site_key}")
 
 
-def post_wecom(webhook, payload):
+def wecom_retryable_error(exc):
+    text = str(exc).lower()
+    return isinstance(exc, (TimeoutError, socket.timeout, ssl.SSLError, OSError)) or "eof occurred in violation of protocol" in text or "timed out" in text or "connection reset" in text
+
+
+def post_wecom(webhook, payload, retries=3):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = Request(webhook, data=data, headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = Request(webhook, data=data, headers={"Content-Type": "application/json"}, method="POST")
+            with urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            last_error = exc
+            if attempt == retries or not wecom_retryable_error(exc):
+                raise
+            print(f"[企业微信] 消息发送重试 {attempt}/{retries}：{exc}")
+            time.sleep(2 * attempt)
+    raise last_error
 
 
 def send_wecom(webhook, content):
@@ -1408,27 +1881,38 @@ def wecom_robot_key(webhook):
     return keys[0]
 
 
-def upload_wecom_file(webhook, file_path):
+def upload_wecom_file(webhook, file_path, retries=3):
     key = wecom_robot_key(webhook)
-    boundary = "----SferaWeComBoundary" + hashlib.md5(str(time.time()).encode()).hexdigest()
     path = Path(file_path)
-    parts = [
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"media\"; filename=\"{path.name}\"\r\nContent-Type: application/zip\r\n\r\n".encode("utf-8"),
-        path.read_bytes(),
-        b"\r\n",
-        f"--{boundary}--\r\n".encode("utf-8"),
-    ]
-    req = Request(
-        f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={key}&type=file",
-        data=b"".join(parts),
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    with urlopen(req, timeout=120) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if payload.get("errcode") != 0:
-        raise RuntimeError(f"企业微信文件上传失败：{payload}")
-    return payload["media_id"]
+    file_bytes = path.read_bytes()
+    last_error = None
+    for attempt in range(1, retries + 1):
+        boundary = "----SferaWeComBoundary" + hashlib.md5(f"{time.time()}-{attempt}".encode()).hexdigest()
+        parts = [
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"media\"; filename=\"{path.name}\"\r\nContent-Type: application/zip\r\n\r\n".encode("utf-8"),
+            file_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+        try:
+            req = Request(
+                f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={key}&type=file",
+                data=b"".join(parts),
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                method="POST",
+            )
+            with urlopen(req, timeout=120) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            if payload.get("errcode") != 0:
+                raise RuntimeError(f"企业微信文件上传失败：{payload}")
+            return payload["media_id"]
+        except Exception as exc:
+            last_error = exc
+            if attempt == retries or not wecom_retryable_error(exc):
+                raise
+            print(f"[企业微信] 文件上传重试 {attempt}/{retries}：{exc}")
+            time.sleep(2 * attempt)
+    raise last_error
 
 
 def send_wecom_file(webhook, file_path):
@@ -1444,7 +1928,7 @@ def safe_filename(value, fallback="product"):
 
 
 def save_product_image_as_jpg(product, target_dir, index):
-    source_path = download_image(product, target_dir)
+    source_path = product.get("image_path") or download_image(product, target_dir)
     if not source_path:
         return None
     target_dir = Path(target_dir)
@@ -1465,6 +1949,28 @@ def save_product_image_as_jpg(product, target_dir, index):
         image = image.convert("RGB")
     image.save(output, format="JPEG", quality=95, subsampling=0)
     return output
+
+
+def prepare_zip_images(products, state_dir, site_name="Sfera"):
+    bundle_root = Path(state_dir) / "wecom_zips" / f"{safe_filename(site_name, 'site').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    image_dir = bundle_root / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    prepared = []
+    for index, product in enumerate(products, 1):
+        try:
+            image_path = save_product_image_as_jpg(product, image_dir, index)
+            if image_path:
+                prepared.append({"product": product, "image_path": image_path, "size": image_path.stat().st_size})
+        except Exception as exc:
+            print(f"[图片保存失败] {product.get('name')}: {exc}")
+    return bundle_root, image_dir, prepared
+
+
+def write_zip_from_paths(zip_path, image_paths):
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for image_path in image_paths:
+            zf.write(image_path, image_path.name)
+    return zip_path
 
 
 def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", marker="NUEVO", max_products_per_zip=None):
@@ -1501,7 +2007,41 @@ def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", m
     with zipfile.ZipFile(master_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for category_zip in category_zips:
             zf.write(category_zip, category_zip.name)
-    return master_zip, category_zips, category_counts
+    return master_zip, category_zips, category_counts, bundle_root
+
+
+def split_zip_bundle_by_size(products, state_dir, site_url, site_name="Sfera", marker="NUEVO", max_bytes=19 * 1024 * 1024):
+    if not products:
+        return [], [], None
+    bundle_root, image_dir, prepared = prepare_zip_images(products, state_dir, site_name)
+    if not prepared:
+        return [], [], bundle_root
+    bundles = []
+    current_bundle = []
+    site_slug = safe_filename(site_name, 'site').replace(' ', '_')
+    trial_zip = bundle_root / f"{site_slug}_trial.zip"
+    for item in prepared:
+        candidate_bundle = current_bundle + [item]
+        write_zip_from_paths(trial_zip, [row["image_path"] for row in candidate_bundle])
+        trial_size = trial_zip.stat().st_size if trial_zip.exists() else 0
+        if current_bundle and trial_size > max_bytes:
+            bundles.append(list(current_bundle))
+            current_bundle = [item]
+        else:
+            current_bundle = candidate_bundle
+    if trial_zip.exists():
+        trial_zip.unlink()
+    if current_bundle:
+        bundles.append(list(current_bundle))
+    split_zips = []
+    category_counts = []
+    for bundle_index, bundle_items in enumerate(bundles, 1):
+        bundle_count = len(bundle_items)
+        category_counts.append(("JEWELRY", len(products)))
+        zip_path = bundle_root / f"{site_slug}_网站上新_{bundle_count}款_{marker}_第{bundle_index}包.zip"
+        write_zip_from_paths(zip_path, [item["image_path"] for item in bundle_items])
+        split_zips.append(zip_path)
+    return split_zips, category_counts, bundle_root
 
 
 def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfera", marker="NUEVO"):
@@ -1514,12 +2054,17 @@ def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfe
         "",
         "**按品类打包：**",
     ]
+    seen = set()
     for category, count in category_counts:
+        key = (category, count)
+        if key in seen:
+            continue
+        seen.add(key)
         lines.append(f"- {category}：{count} 款")
     lines.extend(
         [
             "",
-            "下面发送的是压缩包；如果总包超过企业微信大小限制，会按大类自动拆分发送。每张图片已转换为标准 JPG，并以产品名称命名。",
+            "下面发送的是压缩包；如果总包超过企业微信大小限制，会按总包自动拆分为多个附件发送，但品类统计保持不变。每张图片已转换为标准 JPG，并以产品名称命名。",
         ]
     )
     return "\n".join(lines)
@@ -1527,28 +2072,29 @@ def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfe
 
 def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
     max_bytes = 19 * 1024 * 1024
-    master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
-    bundle_root = master_zip.parent
+    master_zip, category_zips, category_counts, bundle_root = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
+    zip_targets = []
+    cleanup_roots = [bundle_root]
+    if master_zip.stat().st_size <= max_bytes:
+        zip_targets = [master_zip]
+    else:
+        shutil.rmtree(bundle_root, ignore_errors=True)
+        zip_targets, category_counts, split_root = split_zip_bundle_by_size(products, state_dir, site_url, site_name, marker, max_bytes=max_bytes)
+        cleanup_roots = [split_root] if split_root else []
     message = build_zip_bundle_message(products, category_counts, site_url, site_name, marker)
     text_result = send_wecom(webhook, message)
     sent_files = []
-    if master_zip.stat().st_size <= max_bytes:
-        file_result = send_wecom_file(webhook, master_zip)
-        sent_files.append({"path": str(master_zip), "result": file_result})
-    else:
-        shutil.rmtree(bundle_root, ignore_errors=True)
-        master_zip, category_zips, category_counts = build_product_zip_bundle(products, state_dir, site_url, site_name, marker, max_products_per_zip=80)
-        bundle_root = master_zip.parent
-        for category_zip in category_zips:
-            file_result = send_wecom_file(webhook, category_zip)
-            sent_files.append({"path": str(category_zip), "result": file_result})
+    for zip_target in zip_targets:
+        file_result = send_wecom_file(webhook, zip_target)
+        sent_files.append({"path": str(zip_target), "result": file_result})
     ok = text_result.get("errcode") == 0 and all(item["result"].get("errcode") == 0 for item in sent_files)
     if ok:
-        shutil.rmtree(bundle_root, ignore_errors=True)
+        for cleanup_root in cleanup_roots:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
         cleanup = "deleted"
     else:
         cleanup = "kept"
-    return {"message": text_result, "files": sent_files, "zip": str(master_zip), "cleanup": cleanup}
+    return {"message": text_result, "files": sent_files, "zip": str(zip_targets[0]) if zip_targets else str(master_zip), "cleanup": cleanup}
 
 
 def send_wecom_news(webhook, products, title_prefix="Sfera NUEVO"):
@@ -1831,7 +2377,7 @@ def send_category_image_and_links(webhook, products, state_dir):
 
 
 def enabled_sites(config, selected):
-    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka", "lovisa", "stradivarius"]
+    available = config.get("enabled_sites") or ["sfera", "bijou", "bershka", "lovisa", "stradivarius", "primark"]
     if selected != "all":
         return [selected]
     return [site for site in available if site in SITE_META]
@@ -1857,6 +2403,8 @@ def process_site(site_key, config, store, args):
         is_new_seen = store.mark_seen(product)
         if args.force_new or is_new_seen:
             new_products.append(product)
+    if site_key == "primark" and not args.baseline_only and new_products:
+        print("[Primark] 当前只走后台抓取，不再打开详情页逐个补图")
     if args.baseline_only:
         print(f"[基线] {site_name} 仅记录本次商品状态，不下载图片、不发送新增商品包。")
         new_products = []
@@ -1914,7 +2462,7 @@ def main():
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")
-    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "stradivarius", "all"], default="all", help="site to run")
+    parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "stradivarius", "primark", "all"], default="all", help="site to run")
     parser.add_argument("--test-news", action="store_true", help="send one WeCom news batch with the first 8 current NUEVO products")
     parser.add_argument("--test-image", action="store_true", help="send one generated product-list image with the first 8 current NUEVO products")
     parser.add_argument("--test-upload-news", action="store_true", help="upload product images to a temporary public host and send one WeCom news batch")
