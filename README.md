@@ -112,6 +112,7 @@ python sfera_monitor.py --site primark --force-new
 - `.github/workflows/bershka-monitor.yml`
 - `.github/workflows/lovisa-monitor.yml`
 - `.github/workflows/stradivarius-monitor.yml`
+- `.github/workflows/primark-monitor.yml`
 
 默认定时：
 
@@ -121,6 +122,7 @@ Bijou Brigitte：每天 01:17 UTC，也就是北京时间 09:17
 Bershka：每天 01:27 UTC，也就是北京时间 09:27
 Lovisa：每天 01:37 UTC，也就是北京时间 09:37
 Stradivarius：每天 01:47 UTC，也就是北京时间 09:47
+Primark：每天 01:57 UTC，也就是北京时间 09:57
 ```
 
 公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。
@@ -150,7 +152,7 @@ GitHub Actions 会提交这个状态文件：
 
 其中 SQLite 文件用于记住已经发送过的商品，避免第二天重复发送同一批商品。Bijou Brigitte 商品 ID 会使用 `bijou:` 前缀，Bershka 商品 ID 会使用 `bershka:` 前缀，Lovisa 商品 ID 会使用 `lovisa:` 前缀，Stradivarius 商品 ID 会使用 `stradivarius:` 前缀，避免和 Sfera 商品冲突。
 
-Bershka 和 Stradivarius 没有明确的上新标签，所以第一次正常运行会把当前监控分类中的所有商品都视为新增。Lovisa 监控 New Arrivals 当前页商品，首次上线也建议先建立基线。生产上线前如需只建立基线，请先运行对应网站的 `--baseline-only` 并提交状态文件。
+Bershka 和 Stradivarius 没有明确的上新标签，所以第一次正常运行会把当前监控分类中的所有商品都视为新增。Lovisa 监控 New Arrivals 当前页商品，首次上线也建议先建立基线。Primark 当前已支持后台优先的增量监控，首次把现有商品纳入状态库后，后续定时任务只会发送新增商品。生产上线前如需只建立基线，请先运行对应网站的 `--baseline-only` 并提交状态文件。
 
 ## 注意
 
