@@ -92,12 +92,43 @@ class Store:
             )
             """
         )
-        try:
-            self.conn.execute("ALTER TABLE products ADD COLUMN site TEXT")
-        except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc).lower():
-                raise
+        columns = {
+            "site": "TEXT",
+            "source_id": "TEXT",
+            "text_sent_at": "TEXT",
+            "image_sent_at": "TEXT",
+            "last_image_attempt_at": "TEXT",
+            "delivery_error": "TEXT",
+            "delivery_version": "INTEGER",
+            "recovery_tag": "TEXT",
+        }
+        existing = {row[1] for row in self.conn.execute("PRAGMA table_info(products)")}
+        for name, column_type in columns.items():
+            if name not in existing:
+                self.conn.execute(f"ALTER TABLE products ADD COLUMN {name} {column_type}")
+        self.migrate_bijou_delivery_state()
         self.conn.commit()
+
+    def migrate_bijou_delivery_state(self):
+        self.conn.execute(
+            """
+            UPDATE products
+            SET text_sent_at = COALESCE(text_sent_at, first_seen),
+                image_sent_at = COALESCE(image_sent_at, first_seen),
+                delivery_version = 2
+            WHERE site = 'bijou' AND delivery_version IS NULL
+            """
+        )
+        self.conn.execute(
+            """
+            UPDATE products
+            SET text_sent_at = NULL,
+                image_sent_at = NULL,
+                recovery_tag = 'sunset-gem-20260719'
+            WHERE product_id = 'bijou:142749660.1'
+              AND recovery_tag IS NULL
+            """
+        )
 
     def mark_seen(self, product):
         now = datetime.now().isoformat(timespec="seconds")
@@ -107,7 +138,9 @@ class Store:
             self.conn.execute(
                 """
                 UPDATE products
-                SET name = ?, price = ?, url = ?, image_url = ?, category = ?, site = ?, last_seen = ?, image_path = COALESCE(?, image_path)
+                SET name = ?, price = ?, url = ?, image_url = ?, category = ?, site = ?,
+                    source_id = COALESCE(NULLIF(?, ''), source_id), last_seen = ?,
+                    image_path = COALESCE(?, image_path)
                 WHERE product_id = ?
                 """,
                 (
@@ -117,6 +150,7 @@ class Store:
                     product.get("image_url", ""),
                     product.get("category", ""),
                     product.get("site", ""),
+                    product.get("source_id", ""),
                     now,
                     product.get("image_path"),
                     product["product_id"],
@@ -125,8 +159,10 @@ class Store:
         else:
             self.conn.execute(
                 """
-                INSERT INTO products(product_id, name, price, url, image_url, category, site, first_seen, last_seen, image_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO products(
+                    product_id, name, price, url, image_url, category, site, source_id,
+                    first_seen, last_seen, image_path, delivery_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     product["product_id"],
@@ -136,13 +172,67 @@ class Store:
                     product.get("image_url", ""),
                     product.get("category", ""),
                     product.get("site", ""),
+                    product.get("source_id", ""),
                     now,
                     now,
                     product.get("image_path"),
+                    2 if product.get("site") == "bijou" else None,
                 ),
             )
         self.conn.commit()
         return not exists
+
+    def bijou_delivery_pending(self, field):
+        if field not in {"text_sent_at", "image_sent_at"}:
+            raise ValueError(f"Unsupported delivery field: {field}")
+        rows = self.conn.execute(
+            f"""
+            SELECT product_id, name, price, url, image_url, category,
+                   COALESCE(NULLIF(source_id, ''), REPLACE(product_id, 'bijou:', '')) AS source_id,
+                   image_path
+            FROM products
+            WHERE site = 'bijou' AND {field} IS NULL
+            ORDER BY first_seen
+            """
+        ).fetchall()
+        keys = ["product_id", "name", "price", "url", "image_url", "category", "source_id", "image_path"]
+        return [dict(zip(keys, row), site="bijou", image_candidates=[row[4]] if row[4] else []) for row in rows]
+
+    def mark_delivery_success(self, product_ids, field):
+        if field not in {"text_sent_at", "image_sent_at"}:
+            raise ValueError(f"Unsupported delivery field: {field}")
+        product_ids = list(product_ids)
+        if not product_ids:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        placeholders = ",".join("?" for _ in product_ids)
+        self.conn.execute(
+            f"UPDATE products SET {field} = ?, delivery_error = NULL WHERE product_id IN ({placeholders})",
+            [now, *product_ids],
+        )
+        self.conn.commit()
+
+    def record_image_result(self, product, error=""):
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            """
+            UPDATE products
+            SET image_url = COALESCE(NULLIF(?, ''), image_url),
+                image_path = COALESCE(?, image_path),
+                source_id = COALESCE(NULLIF(?, ''), source_id),
+                last_image_attempt_at = ?, delivery_error = ?
+            WHERE product_id = ?
+            """,
+            (
+                product.get("image_url", ""),
+                product.get("image_path"),
+                product.get("source_id", ""),
+                now,
+                error or None,
+                product["product_id"],
+            ),
+        )
+        self.conn.commit()
 
 
 def normalize_text(value):
@@ -481,23 +571,35 @@ def extract_bijou_total_pages(html):
     return max(pages)
 
 
+def bijou_base_product_number(product_number):
+    return re.sub(r"\.\d+$", "", str(product_number or "").strip())
+
+
+def bijou_image_matches_product(value, product_number):
+    if not product_number:
+        return True
+    base_number = bijou_base_product_number(product_number)
+    return product_number in value or (base_number and base_number in value)
+
+
 def bijou_image_candidates_from_html(html, product_number=""):
     urls = []
     for match in re.finditer(r'<img\b[^>]*>', html, re.I | re.S):
         tag = match.group(0)
-        if product_number and product_number not in tag:
+        if product_number and not bijou_image_matches_product(tag, product_number):
             continue
-        src = html_attr(tag, "src")
-        if "/media/" in src:
-            urls.append(src)
-        srcset = html_attr(tag, "srcset")
-        for part in srcset.split(","):
-            candidate = part.strip().split(" ")[0]
-            if "/media/" in candidate or "/thumbnail/" in candidate:
-                urls.append(candidate)
-    for match in re.finditer(r"https?://www\.bijou-brigitte\.com/(?:media|thumbnail)/[^\"'<>\s]+", html):
+        for attribute in ("src", "data-src"):
+            source = html_attr(tag, attribute)
+            if "/media/" in source or "/thumbnail/" in source:
+                urls.append(source)
+        for attribute in ("srcset", "data-srcset"):
+            for part in html_attr(tag, attribute).split(","):
+                candidate = part.strip().split(" ")[0]
+                if "/media/" in candidate or "/thumbnail/" in candidate:
+                    urls.append(candidate)
+    for match in re.finditer(r"(?:https?:)?//www\.bijou-brigitte\.com/(?:media|thumbnail)/[^\"'<>\s]+", html):
         url = match.group(0)
-        if not product_number or product_number in url:
+        if bijou_image_matches_product(url, product_number):
             urls.append(url)
     return unique_urls(urls)
 
@@ -515,13 +617,14 @@ def bijou_detail_image_candidates(product_url, product_number):
 
 def bijou_preferred_image(listing_candidates, product_url, product_number):
     listing_candidates = unique_urls(listing_candidates)
-    if not listing_candidates:
+    detail_candidates = bijou_detail_image_candidates(product_url, product_number)
+    candidates = unique_urls(listing_candidates + detail_candidates)
+    if not candidates:
         return ""
-    first_source = listing_candidates[0]
+    first_source = candidates[0]
     if has_white_background(first_source):
         return first_source
-    candidates = unique_urls(listing_candidates[1:] + bijou_detail_image_candidates(product_url, product_number))
-    for source in candidates:
+    for source in candidates[1:]:
         if has_white_background(source):
             return source
     return first_source
@@ -2103,6 +2206,46 @@ def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfe
     return {"message": text_result, "files": sent_files, "zip": str(zip_targets[0]) if zip_targets else str(master_zip), "cleanup": cleanup}
 
 
+def build_bijou_text_message(products, site_url):
+    today = datetime.now().strftime("%Y-%m-%d")
+    lines = [
+        "**Bijou Brigitte 网站产品上新提醒**",
+        f"> 日期：{today}",
+        f"> 网站：{site_url}",
+        f"> 本次新增 Neu 商品：{len(products)} 款",
+        "",
+    ]
+    for product in products:
+        source_id = product.get("source_id") or product.get("product_id", "").removeprefix("bijou:")
+        details = "｜".join(part for part in [source_id, product.get("price", "")] if part)
+        lines.append(f"- [{product.get('name') or source_id}]({product.get('url') or site_url}){f'｜{details}' if details else ''}")
+    lines.extend(["", "> 图片暂时无法获取的商品也会先提醒；系统将在后续定时任务中持续补图，成功后只发送图片包，不重复发送本条文字。"])
+    return "\n".join(lines)
+
+
+def prepare_bijou_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
+    bundle_root, image_dir, prepared = prepare_zip_images(products, state_dir, "Bijou Brigitte")
+    packages = []
+    current = []
+    current_size = 0
+    safe_limit = max_bytes - 512 * 1024
+    for item in prepared:
+        if current and current_size + item["size"] > safe_limit:
+            packages.append(current)
+            current = []
+            current_size = 0
+        current.append(item)
+        current_size += item["size"]
+    if current:
+        packages.append(current)
+    outputs = []
+    for index, package in enumerate(packages, 1):
+        zip_path = bundle_root / f"Bijou_Brigitte_待补图片_{len(package)}款_第{index}包.zip"
+        write_zip_from_paths(zip_path, [item["image_path"] for item in package])
+        outputs.append((zip_path, [item["product"] for item in package]))
+    return bundle_root, outputs, prepared
+
+
 def send_wecom_news(webhook, products, title_prefix="Sfera NUEVO"):
     articles = []
     for product in products[:8]:
@@ -2396,6 +2539,66 @@ def site_config(config, site_key):
     return cfg
 
 
+def process_bijou(config, store, args, products, site_url, site_name, marker):
+    for product in products:
+        product.setdefault("site", "bijou")
+        store.mark_seen(product)
+    if args.baseline_only:
+        print(f"[基线] {site_name} 仅记录本次商品状态，不下载图片、不发送新增商品包。")
+        return []
+
+    text_pending = store.bijou_delivery_pending("text_sent_at")
+    print(f"[Bijou][交付] 文字待发送 {len(text_pending)} 个")
+    if text_pending:
+        result = send_wecom(config["wecom_webhook"], build_bijou_text_message(text_pending, site_url))
+        if result.get("errcode") != 0:
+            raise RuntimeError(f"Bijou 文字提醒发送失败：{result}")
+        store.mark_delivery_success([product["product_id"] for product in text_pending], "text_sent_at")
+        print(f"[Bijou][交付] 文字发送成功 {len(text_pending)} 个")
+
+    image_pending = store.bijou_delivery_pending("image_sent_at")
+    print(f"[Bijou][交付] 图片待补发 {len(image_pending)} 个")
+    if not config.get("download_images", True):
+        print("[Bijou][交付] 图片下载已禁用，待补图片将在后续运行继续处理。")
+        return text_pending
+    image_ready = []
+    for product in image_pending:
+        try:
+            refine_product_image(product)
+            product["image_candidates"] = unique_urls(
+                [product.get("image_url")] + bijou_detail_image_candidates(product.get("url", ""), product.get("source_id", ""))
+            )
+            if product["image_candidates"]:
+                product["image_url"] = product["image_candidates"][0]
+            product["image_path"] = download_image(product, config["state_dir"])
+            if product.get("image_path"):
+                image_ready.append(product)
+                store.record_image_result(product)
+            else:
+                store.record_image_result(product, "No downloadable image URL found")
+        except Exception as exc:
+            store.record_image_result(product, str(exc))
+            print(f"[Bijou][补图失败] {product.get('source_id')} {product.get('name')}: {exc}")
+
+    delivered_ids = []
+    if image_ready:
+        bundle_root, packages, prepared = prepare_bijou_image_zips(image_ready, config["state_dir"])
+        prepared_ids = {item["product"]["product_id"] for item in prepared}
+        try:
+            for zip_path, package_products in packages:
+                result = send_wecom_file(config["wecom_webhook"], zip_path)
+                if result.get("errcode") != 0:
+                    raise RuntimeError(f"Bijou 图片包发送失败：{result}")
+                package_ids = [product["product_id"] for product in package_products]
+                store.mark_delivery_success(package_ids, "image_sent_at")
+                delivered_ids.extend(package_ids)
+        finally:
+            if set(delivered_ids) == prepared_ids:
+                shutil.rmtree(bundle_root, ignore_errors=True)
+    print(f"[Bijou][交付] 图片成功 {len(delivered_ids)} 个；仍待补发 {len(image_pending) - len(delivered_ids)} 个")
+    return text_pending
+
+
 def process_site(site_key, config, store, args):
     meta = SITE_META[site_key]
     cfg = site_config(config, site_key)
@@ -2403,6 +2606,13 @@ def process_site(site_key, config, store, args):
     site_name = cfg.get("display_name") or meta["display_name"]
     marker = cfg.get("marker") or meta["marker"]
     products = scrape_site(site_key, cfg)
+    if site_key == "bijou":
+        new_products = process_bijou(config, store, args, products, site_url, site_name, marker)
+        snapshot_path = Path(config["state_dir"]) / f"snapshot_{site_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        snapshot_path.write_text(json.dumps(products, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[汇总] {site_name} {marker} 商品 {len(products)} 个；文字新增提醒 {len(new_products)} 个。")
+        print(f"[快照] {snapshot_path}")
+        return products, new_products
     new_products = []
     for product in products:
         product.setdefault("site", site_key)
