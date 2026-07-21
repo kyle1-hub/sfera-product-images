@@ -1921,12 +1921,24 @@ def safe_filename(value, fallback="product"):
     return name[:90] or fallback
 
 
+def product_image_filename_base(product, index):
+    name = safe_filename(product.get("name") or product.get("product_id") or f"product_{index}")
+    if product.get("site") != "bijou":
+        return name
+    product_number = safe_filename(product.get("source_id") or "", "").strip("_")
+    if not product_number:
+        return name
+    if name == product_number or name.startswith(f"{product_number}_"):
+        return name
+    return safe_filename(f"{product_number}_{name}")
+
+
 def save_product_image_as_jpg(product, target_dir, index):
     source_path = product.get("image_path") or download_image(product, target_dir)
     if not source_path:
         return None
     target_dir = Path(target_dir)
-    base = safe_filename(product.get("name") or product.get("product_id") or f"product_{index}")
+    base = product_image_filename_base(product, index)
     output = target_dir / f"{base}.jpg"
     counter = 2
     while output.exists():
