@@ -1,16 +1,8 @@
 name: Bershka Daily Diff Monitor
 
+# Paused while the Bershka monitoring logic is being redesigned.
+# Keep manual dispatch available for controlled validation only.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'sfera_monitor.py'
-      - 'config.example.json'
-      - '.github/workflows/bershka-monitor.yml'
-  schedule:
-    # GitHub Actions uses UTC. 01:27 UTC = 09:27 China time.
-    # Staggered after Sfera and Bijou to reduce state commit conflicts.
-    - cron: '27 1 * * *'
   workflow_dispatch:
 
 permissions:
