@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("sfera_monitor", ROOT / "sfera_monitor.py")
@@ -90,6 +92,48 @@ class BershkaEsTests(unittest.TestCase):
             rows = store.conn.execute("SELECT product_id, site FROM products ORDER BY product_id").fetchall()
             self.assertEqual(rows, [("bershka-es:123", "bershka-es"), ("bershka:123", "bershka")])
             store.conn.close()
+
+    def test_refine_bershka_es_uses_white_background_candidate(self):
+        product = {
+            "site": "bershka-es",
+            "image_url": "https://static.bershka.net/assets/public/test/model-r.jpg",
+            "image_candidates": [
+                "https://static.bershka.net/assets/public/test/model-r.jpg",
+                "https://static.bershka.net/assets/public/test/plain-s.jpg",
+            ],
+        }
+        with patch.object(MONITOR, "has_white_background", side_effect=lambda url: "plain" in url):
+            MONITOR.refine_product_image(product)
+        self.assertEqual(product["image_url"], "https://static.bershka.net/assets/public/test/plain-s.jpg")
+
+    def test_refine_bershka_es_drops_non_white_candidates(self):
+        product = {
+            "site": "bershka-es",
+            "image_url": "https://static.bershka.net/assets/public/test/model-r.jpg",
+            "image_candidates": [
+                "https://static.bershka.net/assets/public/test/model-r.jpg",
+                "https://static.bershka.net/assets/public/test/lifestyle-p.jpg",
+            ],
+        }
+        with patch.object(MONITOR, "has_white_background", return_value=False):
+            MONITOR.refine_product_image(product)
+        self.assertEqual(product["image_url"], "")
+
+    def test_bershka_category_zip_name_starts_with_site_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.jpg"
+            Image.new("RGB", (10, 10), "white").save(source)
+            product = {
+                "site": "bershka-es",
+                "product_id": "bershka-es:123",
+                "name": "Collar prueba",
+                "category": "Bisutería",
+                "image_path": str(source),
+            }
+            _, category_zips, _, _ = MONITOR.build_product_zip_bundle(
+                [product], temp_dir, TARGET_URL, "Bershka ES", "Newly appeared"
+            )
+        self.assertEqual(category_zips[0].name, "Bershka_ES_Bisutería_1款_Newly appeared.zip")
 
     def test_bershka_empty_category_fails(self):
         with patch.object(MONITOR, "fetch_bershka_category_products", return_value=[]):

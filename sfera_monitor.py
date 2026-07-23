@@ -652,17 +652,14 @@ def bijou_preferred_image(listing_candidates, product_url, product_number):
     return first_source
 
 
-def first_white_background_image(candidates):
+def first_white_background_image(candidates, fallback_to_first=True):
     candidates = unique_site_urls(candidates, "https://www.bershka.com/")
     if not candidates:
         return ""
-    first_source = candidates[0]
-    if has_white_background(first_source):
-        return first_source
-    for source in candidates[1:]:
+    for source in candidates:
         if has_white_background(source):
             return source
-    return first_source
+    return candidates[0] if fallback_to_first else ""
 
 
 def refine_product_image(product):
@@ -670,8 +667,8 @@ def refine_product_image(product):
     candidates = product.get("image_candidates") or [product.get("image_url")]
     if site == "bijou":
         product["image_url"] = bijou_preferred_image(candidates, product.get("url", ""), product.get("source_id", "")) or product.get("image_url", "")
-    elif site == "bershka":
-        product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+    elif site in {"bershka", "bershka-es"}:
+        product["image_url"] = first_white_background_image(candidates, fallback_to_first=False)
     elif site == "lovisa":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     elif site == "stradivarius":
@@ -2190,7 +2187,7 @@ def build_product_zip_bundle(products, state_dir, site_url, site_name="Sfera", m
                     save_product_image_as_jpg(product, category_dir, index)
                 except Exception as exc:
                     print(f"[图片保存失败] {product.get('name')}: {exc}")
-            category_zip = bundle_root / f"{category_name}_{chunk_count}款_{marker}{suffix}.zip"
+            category_zip = bundle_root / f"{site_slug}_{category_name}_{chunk_count}款_{marker}{suffix}.zip"
             with zipfile.ZipFile(category_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for image_path in sorted(category_dir.glob("*.jpg")):
                     zf.write(image_path, image_path.name)
