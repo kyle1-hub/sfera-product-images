@@ -1,6 +1,7 @@
 ﻿import argparse
 import base64
 import hashlib
+import http.cookiejar
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -40,7 +41,7 @@ SITE_META = {
     "bershka": {
         "display_name": "Bershka",
         "marker": "Newly appeared",
-        "base_url": "https://www.bershka.com/gb/",
+        "base_url": "https://www.bershka.com/es/mujer/accesorios/bisuteria-n3776.html",
     },
     "lovisa": {
         "display_name": "Lovisa",
@@ -273,6 +274,27 @@ def fetch_text(url, headers, retries=3):
             with urlopen(req, timeout=45) as resp:
                 charset = resp.headers.get_content_charset() or "utf-8"
                 return resp.read().decode(charset, errors="ignore")
+        except HTTPError as exc:
+            last_error = exc
+            if exc.code != 403 or attempt == retries:
+                raise
+            time.sleep(2 * attempt)
+        except Exception as exc:
+            last_error = exc
+            if attempt == retries:
+                raise
+            time.sleep(2 * attempt)
+    raise last_error
+
+
+def fetch_json_request(url, headers, retries=3):
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = Request(url, headers=headers)
+            with urlopen(req, timeout=45) as resp:
+                raw = resp.read()
+            return json.loads(raw.decode("utf-8", errors="ignore"))
         except HTTPError as exc:
             last_error = exc
             if exc.code != 403 or attempt == retries:
@@ -721,12 +743,12 @@ def scrape_bijou(config):
     return products
 
 
-def bershka_headers(referer=None):
+def bershka_headers(referer=None, language="es-ES,es;q=0.9"):
     return {
         "accept": "application/json, text/plain, */*",
-        "accept-language": "en-GB,en;q=0.9",
+        "accept-language": language,
         "origin": "https://www.bershka.com",
-        "referer": referer or "https://www.bershka.com/gb/",
+        "referer": referer or "https://www.bershka.com/es/",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
     }
 
@@ -736,7 +758,7 @@ def extract_bershka_category_id(category_url):
     return match.group(1) if match else ""
 
 
-def bershka_products_array_url(store_id, catalog_id, category_id, language_id=-1, country="gb", version=3):
+def bershka_products_array_url(store_id, catalog_id, category_id, language_id=-5, country="es", version=3):
     return (
         f"https://www.bershka.com/itxrest/{version}/catalog/store/{store_id}/{catalog_id}/productsArray"
         f"?categoryId={quote(str(category_id))}&languageId={quote(str(language_id))}&appId=1&country={quote(country)}"
@@ -749,38 +771,61 @@ def bershka_api_urls(config, category):
         return [explicit]
     store_id = config.get("store_id")
     catalog_id = config.get("catalog_id")
-    category_id = category.get("category_id") or extract_bershka_category_id(category.get("url", ""))
-    language_id = config.get("language_id", -1)
-    country = config.get("country", "gb")
-    if not store_id or not catalog_id or not category_id:
+    category_id = category.get("api_category_id") or category.get("category_id") or extract_bershka_category_id(category.get("url", ""))
+    language_id = config.get("language_id")
+    country = config.get("country")
+    if not store_id or not catalog_id or category_id in (None, "") or language_id in (None, "") or not country:
         return []
     urls = []
     urls.append(
         f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/category/{category_id}/product"
-        f"?languageId={quote(str(language_id))}&appId=1&showProducts=false"
+        f"?languageId={quote(str(language_id))}&appId=1&showProducts=false&country={quote(str(country))}"
     )
-    for version in (3, 2):
-        urls.append(bershka_products_array_url(store_id, catalog_id, category_id, language_id, country, version))
-        urls.append(
-            f"https://www.bershka.com/itxrest/{version}/catalog/store/{store_id}/{catalog_id}/category/{category_id}/product"
-            f"?languageId={quote(str(language_id))}&appId=1&country={quote(country)}"
-        )
-        urls.append(
-            f"https://www.bershka.com/itxrest/{version}/catalog/store/{country}/bershka/{store_id}/{catalog_id}/productsArray"
-            f"?categoryId={quote(str(category_id))}&languageId={quote(str(language_id))}&appId=1"
-        )
+    urls.append(
+        f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/category/{category_id}/product"
+        f"?languageId={quote(str(language_id))}&appId=1&country={quote(str(country))}"
+    )
+    urls.append(bershka_products_array_url(store_id, catalog_id, category_id, language_id, country, 3))
     return urls
 
 
-def fetch_bershka_page(category_url, headers):
-    html = fetch_text(category_url, headers, retries=1)
+def bershka_fetch_text(opener, url, headers):
+    req = Request(url, headers=headers)
+    with opener.open(req, timeout=45) as resp:
+        charset = resp.headers.get_content_charset() or "utf-8"
+        return resp.read().decode(charset, errors="ignore")
+
+
+def bershka_fetch_json(opener, url, headers, retries=3):
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = Request(url, headers=headers)
+            with opener.open(req, timeout=45) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="ignore"))
+        except HTTPError as exc:
+            last_error = exc
+            if exc.code != 403 or attempt == retries:
+                raise
+            time.sleep(2 * attempt)
+        except Exception as exc:
+            last_error = exc
+            if attempt == retries:
+                raise
+            time.sleep(2 * attempt)
+    raise last_error
+
+
+def fetch_bershka_page(category_url, headers, opener=None):
+    opener = opener or build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    html = bershka_fetch_text(opener, category_url, headers)
     if "/_sec/verify?provider=interstitial" not in html or '"bm-verify"' not in html:
         return html
     try:
         i = int(html.split("var i = ", 1)[1].split(";", 1)[0])
         left = html.split('Number("', 1)[1].split('"', 1)[0]
         right = html.split('+ "', 1)[1].split('"', 1)[0]
-        token = html.split('"bm-verify": "', 1)[1].split('"', 1)[0]
+        token = re.findall(r'"bm-verify": "([^"]+)"', html)[-1]
         data = json.dumps({"bm-verify": token, "pow": i + int(left + right)}).encode("utf-8")
         verify_req = Request(
             "https://www.bershka.com/_sec/verify?provider=interstitial",
@@ -788,35 +833,28 @@ def fetch_bershka_page(category_url, headers):
             headers={**headers, "Content-Type": "application/json", "Referer": category_url},
             method="POST",
         )
-        opener = urlopen(verify_req, timeout=30)
-        opener.read()
-        opener.close()
-        return fetch_text(category_url, headers, retries=1)
+        with opener.open(verify_req, timeout=30) as resp:
+            resp.read()
+        return bershka_fetch_text(opener, category_url, headers)
     except Exception:
         return html
 
 
-def discover_bershka_api_context(category_url, headers):
+def discover_bershka_api_context(category_url, headers, opener=None):
     try:
-        html = fetch_bershka_page(category_url, headers)
+        html = fetch_bershka_page(category_url, headers, opener)
     except Exception as exc:
         raise RuntimeError(f"Bershka 页面/API 参数自动发现失败，请在 config.json 配置 store_id/catalog_id 或 category.api_url：{exc}") from exc
     context = {}
-    store_match = re.search(r"storeId=(\d+)", html) or re.search(r"DEFAULT_STORE_ID\s*:\s*(\d+)", html, re.I)
-    if store_match:
-        context["store_id"] = store_match.group(1)
-    language_match = re.search(r"DEFAULT_LANGUAGE_ID\s*:\s*(-?\d+)", html, re.I)
-    if language_match:
-        context["language_id"] = language_match.group(1)
     patterns = {
-        "store_id": r'["\']storeId["\']\s*[:=]\s*["\']?(\d+)',
-        "catalog_id": r'["\']catalogId["\']\s*[:=]\s*["\']?(\d+)',
-        "language_id": r'["\']languageId["\']\s*[:=]\s*["\']?(-?\d+)',
+        "store_id": r'iStoreId["\']?\s*[:=]\s*(\d+)|["\']storeId["\']\s*[:=]\s*["\']?(\d+)|DEFAULT_STORE_ID\s*:\s*(\d+)',
+        "catalog_id": r'iCatalogId["\']?\s*[:=]\s*(\d+)|["\']catalogId["\']\s*[:=]\s*["\']?(\d+)',
+        "language_id": r'iLangId["\']?\s*[:=]\s*(-?\d+)|["\']languageId["\']\s*[:=]\s*["\']?(-?\d+)|DEFAULT_LANGUAGE_ID\s*:\s*(-?\d+)',
     }
     for key, pattern in patterns.items():
         match = re.search(pattern, html, re.I)
         if match:
-            context[key] = match.group(1)
+            context[key] = next(value for value in match.groups() if value not in (None, ""))
     if not context.get("store_id") or not context.get("catalog_id"):
         raise RuntimeError("Bershka 页面未暴露完整 API 参数；请在 config.json 配置 store_id/catalog_id 或 category.api_url。")
     return context
@@ -879,17 +917,18 @@ def extract_bershka_products_from_payload(payload):
     return products
 
 
-def fetch_bershka_products_array_chunk(chunk, config, category_url, headers):
+def fetch_bershka_products_array_chunk(chunk, config, category_url, headers, opener):
     store_id = config.get("store_id")
     catalog_id = config.get("catalog_id")
-    language_id = config.get("language_id", -1)
+    language_id = config.get("language_id")
+    country = config.get("country", "es")
     product_ids_param = quote(",".join(chunk), safe=",")
     url = (
         f"https://www.bershka.com/itxrest/3/catalog/store/{store_id}/{catalog_id}/productsArray"
-        f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}"
+        f"?languageId={quote(str(language_id))}&appId=1&productIds={product_ids_param}&country={quote(str(country))}"
     )
     try:
-        payload = fetch_json(url, headers, retries=3)
+        payload = bershka_fetch_json(opener, url, headers, retries=3)
         products = payload.get("products") or extract_bershka_products_from_payload(payload)
         print(f"[Bershka] productsArray 批次 {len(chunk)} 个 ID 成功，返回 {len(products)} 个商品")
         return products
@@ -901,12 +940,12 @@ def fetch_bershka_products_array_chunk(chunk, config, category_url, headers):
         print(f"[Bershka] productsArray 批次 {len(chunk)} 个 ID 失败，拆分重试：{exc}")
         time.sleep(2)
         return (
-            fetch_bershka_products_array_chunk(chunk[:mid], config, category_url, headers)
-            + fetch_bershka_products_array_chunk(chunk[mid:], config, category_url, headers)
+            fetch_bershka_products_array_chunk(chunk[:mid], config, category_url, headers, opener)
+            + fetch_bershka_products_array_chunk(chunk[mid:], config, category_url, headers, opener)
         )
 
 
-def fetch_bershka_products_array(product_ids, config, category_url):
+def fetch_bershka_products_array(product_ids, config, category_url, headers, opener):
     if not product_ids:
         return []
     store_id = config.get("store_id")
@@ -914,30 +953,34 @@ def fetch_bershka_products_array(product_ids, config, category_url):
     if not store_id or not catalog_id:
         return []
     products = []
-    headers = bershka_headers(category_url)
     for start in range(0, len(product_ids), 10):
         chunk = product_ids[start : start + 10]
-        products.extend(fetch_bershka_products_array_chunk(chunk, config, category_url, headers))
+        products.extend(fetch_bershka_products_array_chunk(chunk, config, category_url, headers, opener))
         time.sleep(2)
     return products
 
 
 def fetch_bershka_category_products(category, config):
     category_name = category.get("name") or category.get("category_id") or "unknown"
-    category_url = category.get("url") or config.get("base_url") or "https://www.bershka.com/gb/"
-    headers = bershka_headers(category_url)
+    category_url = category.get("url") or config.get("base_url") or "https://www.bershka.com/es/"
+    language = config.get("accept_language", "es-ES,es;q=0.9")
+    headers = bershka_headers(category_url, language)
+    opener = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    fetch_bershka_page(category_url, {**headers, "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}, opener)
     urls = bershka_api_urls(config, category)
     active_config = config
     if not urls:
-        discovered = discover_bershka_api_context(category_url, headers)
+        discovered = discover_bershka_api_context(category_url, headers, opener)
         active_config = dict(config)
         active_config.update({key: value for key, value in discovered.items() if key in ("store_id", "catalog_id", "language_id")})
         urls = bershka_api_urls(active_config, category)
+    if not urls:
+        raise RuntimeError("Bershka 缺少 store_id/catalog_id/language_id/category_id，无法构造 API。")
     errors = []
     for url in urls:
         try:
             print(f"[Bershka] 请求 {category_name}: {url}")
-            payload = fetch_json(url, headers, retries=3)
+            payload = bershka_fetch_json(opener, url, headers, retries=3)
             products = extract_bershka_products_from_payload(payload)
             if products:
                 print(f"[Bershka] {category_name}: 直接解析商品 {len(products)} 个")
@@ -946,7 +989,7 @@ def fetch_bershka_category_products(category, config):
             if product_ids:
                 print(f"[Bershka] {category_name}: 解析到商品 ID {len(product_ids)} 个，继续请求 productsArray")
                 time.sleep(2)
-                products = fetch_bershka_products_array(product_ids, active_config, category_url)
+                products = fetch_bershka_products_array(product_ids, active_config, category_url, headers, opener)
                 if products:
                     print(f"[Bershka] {category_name}: productsArray 返回商品 {len(products)} 个")
                     return products
@@ -977,25 +1020,39 @@ def find_first_nested(item, keys):
     return ""
 
 
-def bershka_price(item):
+def bershka_price(item, currency_symbol="€"):
     for key in ("currentPrice", "salePrice", "price", "oldPrice", "minPrice"):
         value = find_first_nested(item, [key])
         if isinstance(value, str):
-            return normalize_text(value)
+            normalized = normalize_text(value)
+            if not normalized:
+                continue
+            if re.fullmatch(r"\d+(?:\.\d+)?", normalized):
+                amount = float(normalized) / 100
+                return f"{amount:.2f} {currency_symbol}".replace(".", ",")
+            return normalized
         if isinstance(value, (int, float)):
-            amount = value / 100 if value >= 1000 else value
-            return f"£{amount:.2f}"
+            amount = value / 100
+            return f"{amount:.2f} {currency_symbol}".replace(".", ",")
         if isinstance(value, dict):
             formatted = first_value(value, ["formatted", "value", "current", "amount"])
             if isinstance(formatted, str):
                 return normalize_text(formatted)
             if isinstance(formatted, (int, float)):
                 amount = formatted / 100 if formatted >= 1000 else formatted
-                return f"£{amount:.2f}"
+                return f"{amount:.2f} {currency_symbol}".replace(".", ",")
     return ""
 
 
-def bershka_absolute_url(value, base_url="https://www.bershka.com/gb/"):
+def bershka_base_url(config=None, category_url=""):
+    source = category_url or (config or {}).get("base_url") or "https://www.bershka.com/es/"
+    parsed = urlparse(source)
+    parts = [part for part in parsed.path.split("/") if part]
+    locale = parts[0] if parts else "es"
+    return f"{parsed.scheme or 'https'}://{parsed.netloc or 'www.bershka.com'}/{locale}/"
+
+
+def bershka_absolute_url(value, base_url="https://www.bershka.com/es/"):
     value = unescape(str(value or "")).strip()
     if not value:
         return ""
@@ -1006,51 +1063,51 @@ def bershka_absolute_url(value, base_url="https://www.bershka.com/gb/"):
     return urljoin(base_url, value)
 
 
-def bershka_image_from_media(media):
+def bershka_image_from_media(media, base_url="https://www.bershka.com/es/"):
     if isinstance(media, str):
-        return bershka_absolute_url(media)
+        return bershka_absolute_url(media, base_url)
     if not isinstance(media, dict):
         return ""
-    for key in ("url", "imageUrl", "path", "src", "href", "set", "deliveryUrl"):
-        value = media.get(key)
-        if isinstance(value, str) and ("/" in value or value.startswith("http")):
-            return bershka_absolute_url(value)
     extra = media.get("extraInfo") or {}
     if isinstance(extra, dict):
-        for key in ("deliveryUrl", "url", "path"):
+        for key in ("deliveryUrl", "url", "deliveryPath", "path"):
             value = extra.get(key)
             if isinstance(value, str):
-                return bershka_absolute_url(value)
+                return bershka_absolute_url(value, base_url)
+    for key in ("deliveryUrl", "url", "imageUrl", "path", "src", "href", "set"):
+        value = media.get(key)
+        if isinstance(value, str) and ("/" in value or value.startswith("http")):
+            return bershka_absolute_url(value, base_url)
     return ""
 
 
-def bershka_image_candidates(item):
+def bershka_image_candidates(item, base_url="https://www.bershka.com/es/"):
     candidates = []
     for key in ("image", "imageUrl", "mainImage", "thumbnail", "url"):
         value = item.get(key) if isinstance(item, dict) else None
         if isinstance(value, str) and re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)|/photos/|/assets/|/static/", value, re.I):
-            candidates.append(bershka_absolute_url(value))
+            candidates.append(bershka_absolute_url(value, base_url))
         elif isinstance(value, dict):
-            candidate = bershka_image_from_media(value)
+            candidate = bershka_image_from_media(value, base_url)
             if candidate:
                 candidates.append(candidate)
     for value in iter_nested(item):
         if isinstance(value, dict):
-            candidate = bershka_image_from_media(value)
+            candidate = bershka_image_from_media(value, base_url)
             if candidate and re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)|/photos/|/assets/|/static/", candidate, re.I):
                 candidates.append(candidate)
         elif isinstance(value, str) and re.search(r"https?://[^\s\"']+\.(?:jpg|jpeg|png|webp)(?:\?[^\s\"']*)?$", value, re.I):
             candidates.append(value)
-    return unique_site_urls(candidates, "https://www.bershka.com/gb/")
+    return unique_site_urls(candidates, base_url)
 
 
-def bershka_product_url(item, category_url):
+def bershka_product_url(item, category_url, base_url="https://www.bershka.com/es/"):
     for key in ("productUrl", "detailUrl", "seoUrl", "url", "href"):
         value = first_value(item, [key])
         if isinstance(value, str) and value:
             if re.search(r"\.(?:jpg|jpeg|png|webp)(?:\?|$)", value, re.I):
                 continue
-            return bershka_absolute_url(value, "https://www.bershka.com/gb/")
+            return bershka_absolute_url(value, base_url)
     product_id = str(first_value(item, ["id", "productId", "product_id", "bundleProductId"]) or "")
     if product_id:
         return re.sub(r"\.html(?:\?.*)?$", f"p{product_id}.html", category_url)
@@ -1060,46 +1117,72 @@ def bershka_product_url(item, category_url):
 def map_bershka_product(item, category_name, category_url, config):
     source_id = str(first_value(item, ["id", "productId", "product_id", "bundleProductId"]) or "")
     name = normalize_text(str(first_value(item, ["name", "title", "productName", "displayName"]) or find_first_nested(item, ["name", "title"]) or ""))
-    product_url_value = bershka_product_url(item, category_url)
+    base_url = bershka_base_url(config, category_url)
+    currency_symbol = config.get("currency_symbol", "€")
+    product_url_value = bershka_product_url(item, category_url, base_url)
     if not source_id:
         match = re.search(r"p(\d+)\.html", product_url_value)
         source_id = match.group(1) if match else ""
-    fallback_id = product_id_for({"url": product_url_value, "category": category_name, "name": name, "price": bershka_price(item)})
-    candidates = bershka_image_candidates(item)
+    price = bershka_price(item, currency_symbol)
+    fallback_id = product_id_for({"url": product_url_value, "category": category_name, "name": name, "price": price})
+    candidates = bershka_image_candidates(item, base_url)
+    namespace = config.get("state_namespace") or "bershka-es"
     return {
-        "site": "bershka",
+        "site": namespace,
         "category": category_name,
         "name": name,
-        "price": bershka_price(item),
+        "price": price,
         "url": product_url_value,
         "image_url": candidates[0] if candidates else "",
         "image_candidates": candidates,
         "source_id": source_id,
-        "product_id": f"bershka:{source_id or fallback_id}",
+        "product_id": f"{namespace}:{source_id or fallback_id}",
         "is_new": True,
     }
 
 
+def validate_bershka_config(config):
+    categories = config.get("categories") or []
+    if len(categories) != 1:
+        raise RuntimeError("Bershka ES 监控必须且只能配置一个 Bisutería 分类。")
+    category = categories[0]
+    category_url = category.get("url") if isinstance(category, dict) else str(category)
+    if "/es/" not in category_url:
+        raise RuntimeError(f"Bershka ES 分类 URL 非西班牙站：{category_url}")
+    for field in ("store_id", "catalog_id", "language_id", "country"):
+        if config.get(field) in (None, ""):
+            raise RuntimeError(f"Bershka ES 缺少配置：{field}")
+    if str(config.get("country")).lower() != "es":
+        raise RuntimeError(f"Bershka ES country 配置错误：{config.get('country')}")
+    if not (category.get("api_category_id") or category.get("category_id") or extract_bershka_category_id(category_url)):
+        raise RuntimeError("Bershka ES 分类缺少 category_id/api_category_id。")
+
+
 def scrape_bershka(config):
+    validate_bershka_config(config)
     products = []
     categories = config.get("categories") or []
-    if not categories:
-        raise RuntimeError("Bershka 未配置 categories")
+    errors = []
     for category in categories:
         category_name = category.get("name") if isinstance(category, dict) else str(category)
-        category_url = category.get("url") if isinstance(category, dict) else config.get("base_url", "https://www.bershka.com/gb/")
-        category_id = category.get("category_id") or extract_bershka_category_id(category_url) if isinstance(category, dict) else ""
+        category_url = category.get("url") if isinstance(category, dict) else config.get("base_url", "https://www.bershka.com/es/")
+        category_id = category.get("api_category_id") or category.get("category_id") or extract_bershka_category_id(category_url) if isinstance(category, dict) else ""
         print(f"[抓取] Bershka {category_name} {category_id}")
         try:
             raw_products = fetch_bershka_category_products(category if isinstance(category, dict) else {"name": category_name, "url": category_url}, config)
         except Exception as exc:
-            print(f"[警告] Bershka {category_name} 本次抓取失败，跳过该分类：{exc}")
+            errors.append(f"{category_name}: {exc}")
             continue
         mapped = [map_bershka_product(item, category_name, category_url, config) for item in raw_products]
         mapped = [product for product in mapped if product.get("product_id") and (product.get("name") or product.get("image_url"))]
+        if not mapped:
+            errors.append(f"{category_name}: API 返回 0 个可用商品")
+            continue
         print(f"[结果] Bershka {category_name}: 当前商品 {len(mapped)} 个")
         products.extend(mapped)
         time.sleep(2)
+    if not products:
+        raise RuntimeError("Bershka ES 分类抓取失败或为空：" + "；".join(errors))
     unique = {}
     for product in products:
         unique[product["product_id"]] = product

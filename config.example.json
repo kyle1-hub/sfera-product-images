@@ -19,23 +19,22 @@
       "base_url": "https://www.bijou-brigitte.com/neu/"
     },
     "bershka": {
-      "display_name": "Bershka",
+      "display_name": "Bershka ES",
       "marker": "Newly appeared",
-      "base_url": "https://www.bershka.com/gb/",
-      "country": "gb",
-      "store_id": "44009506",
-      "catalog_id": "40259534",
-      "language_id": -1,
+      "base_url": "https://www.bershka.com/es/mujer/accesorios/bisuteria-n3776.html",
+      "country": "es",
+      "store_id": "44009500",
+      "catalog_id": "40259530",
+      "language_id": -5,
+      "accept_language": "es-ES,es;q=0.9",
+      "currency_symbol": "€",
+      "state_namespace": "bershka-es",
       "categories": [
         {
-          "name": "Accessories",
-          "url": "https://www.bershka.com/gb/women/clothes/bsk-teen/accessories-n5849.html",
-          "category_id": "1010836578"
-        },
-        {
-          "name": "Jewellery",
-          "url": "https://www.bershka.com/gb/women/sale/accessories/jewellery-c1010850244.html",
-          "category_id": "1010850244"
+          "name": "Bisutería",
+          "url": "https://www.bershka.com/es/mujer/accesorios/bisuteria-n3776.html",
+          "category_id": "3776",
+          "api_category_id": "1010193140"
         }
       ]
     },
