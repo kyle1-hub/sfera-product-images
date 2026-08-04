@@ -73,10 +73,18 @@ def load_config():
 
 
 class Store:
-    def __init__(self, state_dir):
+    def __init__(self, state_dir, read_only=False):
         self.state_dir = Path(state_dir)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.state_dir / "sfera_products.sqlite3"
+        self.read_only = read_only
+        if read_only:
+            if self.db_path.exists():
+                uri = self.db_path.resolve().as_uri() + "?mode=ro"
+                self.conn = sqlite3.connect(uri, uri=True)
+            else:
+                self.conn = sqlite3.connect(":memory:")
+            return
+        self.state_dir.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute(
             """
@@ -139,7 +147,7 @@ class Store:
             self.conn.execute(
                 """
                 UPDATE products
-                SET name = ?, price = ?, url = ?, image_url = ?, category = ?, site = ?,
+                SET name = ?, price = ?, url = ?, image_url = COALESCE(NULLIF(?, ''), image_url), category = ?, site = ?,
                     source_id = COALESCE(NULLIF(?, ''), source_id), last_seen = ?,
                     image_path = COALESCE(?, image_path)
                 WHERE product_id = ?
@@ -198,6 +206,27 @@ class Store:
         ).fetchall()
         keys = ["product_id", "name", "price", "url", "image_url", "category", "source_id", "image_path"]
         return [dict(zip(keys, row), site="bijou", image_candidates=[row[4]] if row[4] else []) for row in rows]
+
+    def site_product_ids(self, site):
+        try:
+            rows = self.conn.execute("SELECT product_id FROM products WHERE site = ?", (site,)).fetchall()
+        except sqlite3.OperationalError:
+            return set()
+        return {row[0] for row in rows}
+
+    def site_counts(self, site):
+        try:
+            product_count = self.conn.execute("SELECT COUNT(*) FROM products WHERE site = ?", (site,)).fetchone()[0]
+            image_count = self.conn.execute(
+                """
+                SELECT COUNT(*) FROM products
+                WHERE site = ? AND COALESCE(NULLIF(image_path, ''), NULL) IS NOT NULL
+                """,
+                (site,),
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            return {"products": 0, "images": 0}
+        return {"products": product_count, "images": image_count}
 
     def mark_delivery_success(self, product_ids, field):
         if field not in {"text_sent_at", "image_sent_at"}:
@@ -554,9 +583,40 @@ def bijou_headers():
     }
 
 
-def bijou_page_url(page):
-    base = "https://www.bijou-brigitte.com/neu/"
-    return base if page <= 1 else f"{base}?p={page}"
+def bijou_page_url(listing_url, page):
+    if page <= 1:
+        return listing_url
+    parsed = urlparse(listing_url)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    query["p"] = [str(page)]
+    return parsed._replace(query=urlencode(query, doseq=True)).geturl()
+
+
+def bijou_listing_configs(config):
+    entries = config.get("listing_urls") or []
+    if not entries:
+        entries = [
+            {"name": "Neu", "url": config.get("base_url") or SITE_META["bijou"]["base_url"], "require_new_flag": False},
+        ]
+    listings = []
+    seen = set()
+    for index, entry in enumerate(entries, 1):
+        if isinstance(entry, str):
+            url = entry
+            name = f"Listing {index}"
+            require_new_flag = False
+        else:
+            url = entry.get("url") or entry.get("base_url") or ""
+            name = entry.get("name") or f"Listing {index}"
+            require_new_flag = entry.get("require_new_flag")
+            if require_new_flag is None:
+                require_new_flag = False
+        url = urljoin("https://www.bijou-brigitte.com/", str(url or "").strip())
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        listings.append({"name": name, "url": url, "require_new_flag": bool(require_new_flag)})
+    return listings
 
 
 def html_attr(fragment, name):
@@ -591,6 +651,43 @@ def extract_bijou_total_pages(html):
     for match in re.finditer(r'[?&]p=(\d+)', html):
         pages.append(int(match.group(1)))
     return max(pages)
+
+
+def bijou_sku_from_url(url):
+    match = re.search(r"(\d{8,12})(?:\.\d+)?(?:[/?#]|$)", url or "")
+    return match.group(1) if match else ""
+
+
+def bijou_has_new_flag(chunk):
+    for tag in re.findall(r"<[^>]+>", chunk or ""):
+        class_value = html_attr(tag, "class")
+        classes = set(re.split(r"\s+", class_value.lower()))
+        if "flag" in classes and "new" in classes:
+            return True
+    return bool(re.search(r"class=[\"'][^\"']*(?:flag|badge|label)[^\"']*[\"'][^>]*>[\s\S]{0,120}?\bNeu\b", chunk or "", re.I))
+
+
+def bijou_product_chunks(html):
+    chunks = []
+    pattern = re.compile(r"<(?P<tag>\w+)\b[^>]*class=[\"'][^\"']*cms-listing-col[^\"']*[\"'][^>]*>[\s\S]*?(?=<\w+\b[^>]*class=[\"'][^\"']*cms-listing-col|$)", re.I)
+    for match in pattern.finditer(html or ""):
+        chunk = match.group(0)
+        if "product-box" in chunk:
+            chunks.append(chunk)
+    if chunks:
+        return chunks
+    return [chunk for chunk in re.split(r'<div\s+class="cms-listing-col[^>]*>', html or "", flags=re.I) if "product-box" in chunk]
+
+
+def merge_bijou_products(existing, product):
+    merged = dict(existing)
+    for key in ("name", "price", "url", "image_url", "category", "source_id"):
+        if not merged.get(key) and product.get(key):
+            merged[key] = product[key]
+    merged["image_candidates"] = unique_urls((merged.get("image_candidates") or []) + (product.get("image_candidates") or []))
+    if not merged.get("image_url") and merged["image_candidates"]:
+        merged["image_url"] = merged["image_candidates"][0]
+    return merged
 
 
 def bijou_base_product_number(product_number):
@@ -685,21 +782,19 @@ def bijou_big_category(data_group):
     return "Neuer Schmuck"
 
 
-def extract_bijou_products(html):
+def extract_bijou_products(html, require_new_flag=True):
     products = []
-    chunks = re.split(r'<div\s+class="cms-listing-col[^>]*>', html, flags=re.I)
-    for chunk in chunks:
-        if "product-box" not in chunk:
+    for chunk in bijou_product_chunks(html):
+        if require_new_flag and not bijou_has_new_flag(chunk):
             continue
-        if not re.search(r'class="flag\s+new"[^>]*>\s*Neu\s*<', chunk, re.I):
-            continue
-        product_number = html_attr(chunk, "data-number")
-        data_group = html_attr(chunk, "data-group")
-        name = html_attr(chunk, "data-name") or strip_html(re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S).group(1) if re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S) else "")
-        price_value = html_attr(chunk, "data-price")
-        price = f"{float(price_value):.2f} €".replace(".", ",") if re.fullmatch(r"\d+(?:\.\d+)?", price_value or "") else price_value
         link_match = re.search(r"<a\b[^>]*href=[\"']([^\"']+)[\"']", chunk, re.I)
         product_url_value = urljoin("https://www.bijou-brigitte.com/", unescape(link_match.group(1))) if link_match else "https://www.bijou-brigitte.com/neu/"
+        product_number = html_attr(chunk, "data-number") or bijou_sku_from_url(product_url_value)
+        data_group = html_attr(chunk, "data-group")
+        name_match = re.search(r'<div[^>]+class="product-name"[^>]*>(.*?)</div>', chunk, re.I | re.S)
+        name = html_attr(chunk, "data-name") or strip_html(name_match.group(1) if name_match else "")
+        price_value = html_attr(chunk, "data-price")
+        price = f"{float(price_value):.2f} €".replace(".", ",") if re.fullmatch(r"\d+(?:\.\d+)?", price_value or "") else price_value
         candidates = bijou_image_candidates_from_html(chunk, product_number)
         fallback_id = product_id_for({"url": product_url_value, "name": name, "price": price})
         products.append(
@@ -719,24 +814,31 @@ def extract_bijou_products(html):
     return products
 
 
-def scrape_bijou(config):
-    headers = bijou_headers()
-    print("[抓取] Bijou Brigitte Neu")
-    first_html = fetch_text(bijou_page_url(1), headers)
+def scrape_bijou_listing(listing, headers):
+    print(f"[抓取] Bijou Brigitte {listing['name']}: {listing['url']}")
+    first_html = fetch_text(bijou_page_url(listing["url"], 1), headers)
     total_pages = extract_bijou_total_pages(first_html)
-    products = extract_bijou_products(first_html)
-    print(f"[分页] Bijou Brigitte Neu: 1/{total_pages}，本页 {len(products)} 个")
+    products = extract_bijou_products(first_html, require_new_flag=listing["require_new_flag"])
+    print(f"[分页] Bijou Brigitte {listing['name']}: 1/{total_pages}，本页 {len(products)} 个")
     for page in range(2, total_pages + 1):
-        html = fetch_text(bijou_page_url(page), headers)
-        page_products = extract_bijou_products(html)
-        print(f"[分页] Bijou Brigitte Neu: {page}/{total_pages}，本页 {len(page_products)} 个")
+        html = fetch_text(bijou_page_url(listing["url"], page), headers)
+        page_products = extract_bijou_products(html, require_new_flag=listing["require_new_flag"])
+        print(f"[分页] Bijou Brigitte {listing['name']}: {page}/{total_pages}，本页 {len(page_products)} 个")
         products.extend(page_products)
         time.sleep(0.5)
+    return products
+
+
+def scrape_bijou(config):
+    headers = bijou_headers()
     unique = {}
-    for product in products:
-        unique[product["product_id"]] = product
+    listings = bijou_listing_configs(config)
+    for listing in listings:
+        for product in scrape_bijou_listing(listing, headers):
+            product_id = product["product_id"]
+            unique[product_id] = merge_bijou_products(unique[product_id], product) if product_id in unique else product
     products = list(unique.values())
-    print(f"[结果] Bijou Brigitte Neu: Neu {len(products)} 个")
+    print(f"[结果] Bijou Brigitte: {len(listings)} 个入口，唯一商品 {len(products)} 个")
     return products
 
 
@@ -2619,6 +2721,56 @@ def site_config(config, site_key):
     return cfg
 
 
+def bijou_product_image_urls(product):
+    return unique_urls((product.get("image_candidates") or []) + ([product.get("image_url")] if product.get("image_url") else []))
+
+
+def build_bijou_audit_report(store, products):
+    db_counts = store.site_counts("bijou")
+    db_product_ids = store.site_product_ids("bijou")
+    website_product_ids = {product["product_id"] for product in products}
+    website_image_urls = set()
+    new_image_urls = set()
+    new_products = []
+    website_products_with_images = 0
+    new_products_with_images = 0
+    for product in products:
+        image_urls = bijou_product_image_urls(product)
+        if image_urls:
+            website_products_with_images += 1
+            website_image_urls.update(image_urls)
+        if product["product_id"] not in db_product_ids:
+            new_products.append(product)
+            if image_urls:
+                new_products_with_images += 1
+                new_image_urls.update(image_urls)
+    return {
+        "db_products": db_counts["products"],
+        "db_images": db_counts["images"],
+        "website_products": len(website_product_ids),
+        "website_products_with_images": website_products_with_images,
+        "website_image_urls": len(website_image_urls),
+        "new_products": len(new_products),
+        "new_products_with_images": new_products_with_images,
+        "new_image_urls": len(new_image_urls),
+    }
+
+
+def print_bijou_audit_report(report):
+    print("[Bijou][审计] 只读对比，不写状态、不下载图片、不发送企业微信。")
+    print(f"[Bijou][审计] 数据库商品：{report['db_products']} 个；数据库已落图商品：{report['db_images']} 个")
+    print(
+        f"[Bijou][审计] 网站商品：{report['website_products']} 个；"
+        f"网站有图商品：{report['website_products_with_images']} 个；"
+        f"网站图片URL：{report['website_image_urls']} 个"
+    )
+    print(
+        f"[Bijou][审计] 新增商品：{report['new_products']} 个；"
+        f"新增有图商品：{report['new_products_with_images']} 个；"
+        f"新增图片URL：{report['new_image_urls']} 个"
+    )
+
+
 def process_bijou(config, store, args, products, site_url, site_name, marker):
     for product in products:
         product.setdefault("site", "bijou")
@@ -2686,6 +2838,10 @@ def process_site(site_key, config, store, args):
     site_name = cfg.get("display_name") or meta["display_name"]
     marker = cfg.get("marker") or meta["marker"]
     products = scrape_site(site_key, cfg)
+    if site_key == "bijou" and getattr(args, "audit_only", False):
+        report = build_bijou_audit_report(store, products)
+        print_bijou_audit_report(report)
+        return products, []
     if site_key == "bijou":
         new_products = process_bijou(config, store, args, products, site_url, site_name, marker)
         snapshot_path = Path(config["state_dir"]) / f"snapshot_{site_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -2736,12 +2892,14 @@ def process_site(site_key, config, store, args):
 
 def run(args):
     config = load_config()
+    if args.audit_only and args.site != "bijou":
+        raise ValueError("--audit-only 目前仅支持 --site bijou")
     if args.test_wecom:
         result = send_wecom(config["wecom_webhook"], "产品上新监控：企业微信机器人测试消息发送成功。")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    store = Store(config["state_dir"])
+    store = Store(config["state_dir"], read_only=args.audit_only)
     failures = []
     for site_key in enabled_sites(config, args.site):
         try:
@@ -2758,6 +2916,7 @@ def main():
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")
+    parser.add_argument("--audit-only", action="store_true", help="Bijou only: compare website products with database without writing state or sending")
     parser.add_argument("--site", choices=["sfera", "bijou", "bershka", "lovisa", "stradivarius", "primark", "all"], default="all", help="site to run")
     parser.add_argument("--test-news", action="store_true", help="send one WeCom news batch with the first 8 current NUEVO products")
     parser.add_argument("--test-image", action="store_true", help="send one generated product-list image with the first 8 current NUEVO products")

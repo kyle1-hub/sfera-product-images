@@ -99,6 +99,126 @@ class BijouDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(value, "142749660.1_Ring Set - Sunset Gem")
 
+    def test_bijou_page_url_preserves_sorted_listing_query(self):
+        url = "https://www.bijou-brigitte.com/schmuck/ohrringe/?order=neueste&p=1"
+        self.assertEqual(MONITOR.bijou_page_url(url, 1), url)
+        self.assertEqual(
+            MONITOR.bijou_page_url(url, 3),
+            "https://www.bijou-brigitte.com/schmuck/ohrringe/?order=neueste&p=3",
+        )
+
+    def test_extract_bijou_products_accepts_flexible_new_flag(self):
+        html = '''
+        <div class="cms-listing-col extra">
+          <div class="product-box" data-number="142749661.1" data-group="Schmuck;Ringe" data-name="Neu Ring" data-price="12.95">
+            <span class="new flag badge"><span>Neu</span></span>
+            <a href="/neu-ring-142749661.1">Neu Ring</a>
+            <img data-src="/media/aa/bb/142749661_0.webp">
+          </div>
+        </div>
+        '''
+        products = MONITOR.extract_bijou_products(html)
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0]["product_id"], "bijou:142749661.1")
+        self.assertTrue(products[0]["image_candidates"])
+
+    def test_extract_bijou_products_rejects_non_new_when_flag_required(self):
+        html = '''
+        <div class="cms-listing-col">
+          <div class="product-box" data-number="142749662.1" data-name="Old Ring" data-price="9.95">
+            <a href="/old-ring-142749662.1">Old Ring</a>
+          </div>
+        </div>
+        '''
+        self.assertEqual(MONITOR.extract_bijou_products(html), [])
+        self.assertEqual(len(MONITOR.extract_bijou_products(html, require_new_flag=False)), 1)
+
+    def test_extract_bijou_products_falls_back_to_url_sku(self):
+        html = '''
+        <div class="cms-listing-col">
+          <div class="product-box" data-name="URL Ring" data-price="7.95">
+            <span class="flag new">Neu</span>
+            <a href="/url-ring-142749663.1">URL Ring</a>
+          </div>
+        </div>
+        '''
+        product = MONITOR.extract_bijou_products(html)[0]
+        self.assertEqual(product["source_id"], "142749663")
+        self.assertEqual(product["product_id"], "bijou:142749663")
+
+    def test_bijou_default_listing_uses_neu_without_flag_filter(self):
+        listings = MONITOR.bijou_listing_configs({"base_url": "https://www.bijou-brigitte.com/neu/"})
+        self.assertEqual(listings, [{"name": "Neu", "url": "https://www.bijou-brigitte.com/neu/", "require_new_flag": False}])
+
+    def test_scrape_bijou_multiple_listings_dedupes_and_merges_images(self):
+        html_one = '''
+        <div class="cms-listing-col"><div class="product-box" data-number="142749664.1" data-name="Merge Ring" data-price="1.95">
+          <span class="flag new">Neu</span><a href="/merge-ring-142749664.1">Merge Ring</a>
+          <img data-src="/media/aa/bb/142749664_0.webp">
+        </div></div>
+        '''
+        html_two = '''
+        <div class="cms-listing-col"><div class="product-box" data-number="142749664.1" data-name="Merge Ring" data-price="1.95">
+          <a href="/merge-ring-142749664.1">Merge Ring</a>
+          <img data-src="/media/aa/bb/142749664_1.webp">
+        </div></div>
+        '''
+        config = {
+            "base_url": "https://www.bijou-brigitte.com/neu/",
+            "listing_urls": [
+                {"name": "Neu", "url": "https://www.bijou-brigitte.com/neu/", "require_new_flag": True},
+                {"name": "Sorted", "url": "https://www.bijou-brigitte.com/schmuck/ohrringe/?order=neueste&p=1", "require_new_flag": False},
+            ],
+        }
+        responses = {
+            "https://www.bijou-brigitte.com/neu/": html_one,
+            "https://www.bijou-brigitte.com/schmuck/ohrringe/?order=neueste&p=1": html_two,
+        }
+        with patch.object(MONITOR, "fetch_text", side_effect=lambda url, headers: responses[url]):
+            products = MONITOR.scrape_bijou(config)
+        self.assertEqual(len(products), 1)
+        self.assertEqual(len(products[0]["image_candidates"]), 2)
+
+    def test_bijou_audit_report_counts_database_website_and_new_products(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MONITOR.Store(temp_dir)
+            store.mark_seen(
+                {
+                    "site": "bijou",
+                    "category": "Neuer Schmuck",
+                    "name": "Known Ring",
+                    "price": "1,00 €",
+                    "url": "https://www.bijou-brigitte.com/known-142749665.1",
+                    "image_url": "https://www.bijou-brigitte.com/media/142749665_0.webp",
+                    "image_candidates": ["https://www.bijou-brigitte.com/media/142749665_0.webp"],
+                    "source_id": "142749665.1",
+                    "product_id": "bijou:142749665.1",
+                    "image_path": str(Path(temp_dir) / "known.jpg"),
+                }
+            )
+            products = [
+                {
+                    "site": "bijou",
+                    "product_id": "bijou:142749665.1",
+                    "image_url": "https://www.bijou-brigitte.com/media/142749665_0.webp",
+                    "image_candidates": ["https://www.bijou-brigitte.com/media/142749665_0.webp"],
+                },
+                {
+                    "site": "bijou",
+                    "product_id": "bijou:142749666.1",
+                    "image_url": "https://www.bijou-brigitte.com/media/142749666_0.webp",
+                    "image_candidates": ["https://www.bijou-brigitte.com/media/142749666_0.webp"],
+                },
+            ]
+            report = MONITOR.build_bijou_audit_report(store, products)
+            self.assertEqual(report["db_products"], 1)
+            self.assertEqual(report["db_images"], 1)
+            self.assertEqual(report["website_products"], 2)
+            self.assertEqual(report["website_products_with_images"], 2)
+            self.assertEqual(report["new_products"], 1)
+            self.assertEqual(report["new_products_with_images"], 1)
+            store.conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
