@@ -2782,7 +2782,8 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
     text_pending = store.bijou_delivery_pending("text_sent_at")
     print(f"[Bijou][交付] 文字待发送 {len(text_pending)} 个")
     if text_pending:
-        result = send_wecom(config["wecom_webhook"], build_bijou_text_message(text_pending, site_url))
+        message = f"Bijou /neu/ 新增 {len(text_pending)} 款，图片包即将发送"
+        result = send_wecom(config["wecom_webhook"], message)
         if result.get("errcode") != 0:
             raise RuntimeError(f"Bijou 文字提醒发送失败：{result}")
         store.mark_delivery_success([product["product_id"] for product in text_pending], "text_sent_at")
