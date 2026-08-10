@@ -16,7 +16,10 @@
     "bijou": {
       "display_name": "Bijou Brigitte",
       "marker": "Neu",
-      "base_url": "https://www.bijou-brigitte.com/neu/"
+      "base_url": "https://www.bijou-brigitte.com/neu/",
+      "listing_urls": [
+        {"name": "Neu", "url": "https://www.bijou-brigitte.com/neu/", "require_new_flag": false}
+      ]
     },
     "bershka": {
       "display_name": "Bershka ES",
