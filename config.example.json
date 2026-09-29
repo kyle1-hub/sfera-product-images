@@ -44,7 +44,8 @@
     "lovisa": {
       "display_name": "Lovisa",
       "marker": "New",
-      "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1"
+      "base_url": "https://www.lovisa.com/collections/new-arrivals?page=1",
+      "detail_workers": 8
     },
     "stradivarius": {
       "display_name": "Stradivarius",
@@ -110,5 +111,9 @@
   "timeout_ms": 90000,
   "state_dir": "state",
   "download_images": true,
-  "send_empty_report": true
+  "send_empty_report": true,
+  "share_library_root": "\\\\192.168.10.254\\alpha_share\\9QOT\\03 QOT PHOTO LIBRARY-图片库\\06  客户网站图片",
+  "share_site_folders": {
+    "sfera": "E03-SFERA"
+  }
 }

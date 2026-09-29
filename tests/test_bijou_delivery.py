@@ -219,6 +219,65 @@ class BijouDeliveryTests(unittest.TestCase):
             self.assertEqual(report["new_products_with_images"], 1)
             store.conn.close()
 
+    def test_listing_thumbnail_candidates_upgrade_to_media(self):
+        html = '''
+        <img data-src="/thumbnail/aa/bb/142749660_0_tb_400x400.webp"
+             data-srcset="/thumbnail/aa/bb/142749660_0_400x400.webp 400w">
+        '''
+        candidates = MONITOR.bijou_image_candidates_from_html(html, "142749660.1")
+        self.assertEqual(candidates, ["https://www.bijou-brigitte.com/media/aa/bb/142749660_0.webp"])
+
+    def test_upgrade_image_url_does_not_rewrite_product_pages(self):
+        product_url = "https://www.bijou-brigitte.com/ring-set-sunset-gem-142749660.1"
+        self.assertEqual(MONITOR.upgrade_image_url(product_url), product_url)
+
+    def test_process_bijou_keeps_white_preferred_image(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MONITOR.Store(temp_dir)
+            product = {
+                "site": "bijou",
+                "category": "Neuer Schmuck",
+                "name": "Ring Set - Sunset Gem",
+                "price": "12,95 €",
+                "url": "https://www.bijou-brigitte.com/ring-set-sunset-gem-142749660.1",
+                "image_url": "https://www.bijou-brigitte.com/thumbnail/aa/bb/142749660_0_400x400.webp",
+                "image_candidates": ["https://www.bijou-brigitte.com/thumbnail/aa/bb/142749660_0_400x400.webp"],
+                "source_id": "142749660.1",
+                "product_id": "bijou:142749660.1",
+            }
+            args = argparse.Namespace(baseline_only=False)
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            image_path = Path(temp_dir) / "ready.jpg"
+            image_path.write_bytes(b"image")
+            downloaded = []
+
+            def fake_download(item, state_dir):
+                downloaded.append(item.get("image_url"))
+                return str(image_path)
+
+            with patch.object(MONITOR, "send_wecom", return_value={"errcode": 0}), patch.object(
+                MONITOR,
+                "bijou_detail_image_candidates",
+                return_value=["https://www.bijou-brigitte.com/media/aa/bb/142749660_1.webp"],
+            ), patch.object(
+                MONITOR, "has_white_background", side_effect=lambda url: "_1.webp" in url
+            ), patch.object(
+                MONITOR, "download_image", side_effect=fake_download
+            ), patch.object(
+                MONITOR,
+                "prepare_bijou_image_zips",
+                return_value=(
+                    Path(temp_dir) / "bundle",
+                    [(Path(temp_dir) / "pkg.zip", [product])],
+                    [{"product": product, "image_path": image_path, "size": 5}],
+                ),
+            ), patch.object(MONITOR, "send_wecom_file", return_value={"errcode": 0}):
+                (Path(temp_dir) / "pkg.zip").write_bytes(b"zip")
+                MONITOR.process_bijou(config, store, args, [product], product["url"], "Bijou Brigitte", "Neu")
+
+            self.assertEqual(downloaded, ["https://www.bijou-brigitte.com/media/aa/bb/142749660_1.webp"])
+            store.conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

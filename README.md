@@ -78,6 +78,8 @@ python sfera_monitor.py --site stradivarius
 python sfera_monitor.py --site primark
 ```
 
+Lovisa 会从第 1 页开始完整读取 New Arrivals 的 `products.json`，直到明确空页；无图新品仍先发送文字提醒，后续定时任务只补发图片。图片交付前先检查列表接口已有候选图：已有白底候选时直接使用，缺少白底或无候选时才并发补抓产品详情 `.js` 的完整候选图，默认 `detail_workers=8`。最终仍按白底优先；如果白底检测漏判或确实没有白底图，则回退发送候选中的第一张图，避免漏图。文字和图片分别记录成功状态，企业微信失败的商品会保留待重试，不再因为已进入 SQLite 而永久漏推。商品仍按父产品 ID 去重，已有父商品新增颜色或 SKU 不单独推送。
+
 Lovisa 分类规则：产品名包含 `waterproof` 归入 `不锈钢`；否则包含 `plated` 归入 `真金`；否则包含 `Cubic Zirconia` 归入 `CZ`；剩余归入 `fashion`。多关键词同时出现时按上述优先级归类。
 
 Stradivarius 监控 `EARRINGS`、`NECKLACES`、`RINGS`、`BRACELETS`、`CHOKERS` 五个分类，按 SQLite 首次出现判断新增。

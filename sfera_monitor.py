@@ -12,13 +12,14 @@ import ssl
 import sys
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import lru_cache
 from html import unescape
 from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
@@ -27,6 +28,11 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_pla
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
 EXAMPLE_CONFIG_PATH = Path(__file__).with_name("config.example.json")
+LOVISA_PAGE_LIMIT = 250
+LOVISA_MAX_PAGES = 100
+LOVISA_DELIVERY_VERSION = 2
+LOVISA_DETAIL_WORKERS = 8
+LOVISA_WECOM_MARKDOWN_LIMIT = 3200
 SITE_META = {
     "sfera": {
         "display_name": "Sfera",
@@ -59,6 +65,10 @@ SITE_META = {
         "base_url": "https://www.primark.com/en-us/c/women/accessories/jewelry",
     },
 }
+DEFAULT_SHARE_LIBRARY_ROOT = r"\\192.168.10.254\alpha_share\9QOT\03 QOT PHOTO LIBRARY-图片库\06  客户网站图片"
+DEFAULT_SHARE_SITE_FOLDERS = {
+    "sfera": "E03-SFERA",
+}
 
 
 def load_config():
@@ -69,6 +79,10 @@ def load_config():
     if env_webhook:
         cfg["wecom_webhook"] = env_webhook
     cfg["state_dir"] = str((Path(__file__).parent / cfg.get("state_dir", "state")).resolve())
+    cfg["share_library_root"] = cfg.get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    folders = dict(DEFAULT_SHARE_SITE_FOLDERS)
+    folders.update(cfg.get("share_site_folders") or {})
+    cfg["share_site_folders"] = folders
     return cfg
 
 
@@ -116,6 +130,7 @@ class Store:
             if name not in existing:
                 self.conn.execute(f"ALTER TABLE products ADD COLUMN {name} {column_type}")
         self.migrate_bijou_delivery_state()
+        self.migrate_lovisa_delivery_state()
         self.conn.commit()
 
     def migrate_bijou_delivery_state(self):
@@ -139,7 +154,19 @@ class Store:
             """
         )
 
-    def mark_seen(self, product):
+    def migrate_lovisa_delivery_state(self):
+        self.conn.execute(
+            """
+            UPDATE products
+            SET text_sent_at = COALESCE(text_sent_at, first_seen),
+                image_sent_at = COALESCE(image_sent_at, first_seen),
+                delivery_version = ?
+            WHERE site = 'lovisa' AND delivery_version IS NULL
+            """,
+            (LOVISA_DELIVERY_VERSION,),
+        )
+
+    def mark_seen(self, product, delivery_version=None):
         now = datetime.now().isoformat(timespec="seconds")
         cur = self.conn.execute("SELECT product_id FROM products WHERE product_id = ?", (product["product_id"],))
         exists = cur.fetchone() is not None
@@ -185,27 +212,11 @@ class Store:
                     now,
                     now,
                     product.get("image_path"),
-                    2 if product.get("site") == "bijou" else None,
+                    delivery_version if delivery_version is not None else (2 if product.get("site") == "bijou" else None),
                 ),
             )
         self.conn.commit()
         return not exists
-
-    def bijou_delivery_pending(self, field):
-        if field not in {"text_sent_at", "image_sent_at"}:
-            raise ValueError(f"Unsupported delivery field: {field}")
-        rows = self.conn.execute(
-            f"""
-            SELECT product_id, name, price, url, image_url, category,
-                   COALESCE(NULLIF(source_id, ''), REPLACE(product_id, 'bijou:', '')) AS source_id,
-                   image_path
-            FROM products
-            WHERE site = 'bijou' AND {field} IS NULL
-            ORDER BY first_seen
-            """
-        ).fetchall()
-        keys = ["product_id", "name", "price", "url", "image_url", "category", "source_id", "image_path"]
-        return [dict(zip(keys, row), site="bijou", image_candidates=[row[4]] if row[4] else []) for row in rows]
 
     def site_product_ids(self, site):
         try:
@@ -228,6 +239,39 @@ class Store:
             return {"products": 0, "images": 0}
         return {"products": product_count, "images": image_count}
 
+    def bijou_delivery_pending(self, field):
+        if field not in {"text_sent_at", "image_sent_at"}:
+            raise ValueError(f"Unsupported delivery field: {field}")
+        rows = self.conn.execute(
+            f"""
+            SELECT product_id, name, price, url, image_url, category,
+                   COALESCE(NULLIF(source_id, ''), REPLACE(product_id, 'bijou:', '')) AS source_id,
+                   image_path
+            FROM products
+            WHERE site = 'bijou' AND {field} IS NULL
+            ORDER BY first_seen
+            """
+        ).fetchall()
+        keys = ["product_id", "name", "price", "url", "image_url", "category", "source_id", "image_path"]
+        return [dict(zip(keys, row), site="bijou", image_candidates=[row[4]] if row[4] else []) for row in rows]
+
+    def lovisa_delivery_pending(self, field):
+        if field not in {"text_sent_at", "image_sent_at"}:
+            raise ValueError(f"Unsupported delivery field: {field}")
+        rows = self.conn.execute(
+            f"""
+            SELECT product_id, name, price, url, image_url, category,
+                   COALESCE(NULLIF(source_id, ''), REPLACE(product_id, 'lovisa:', '')) AS source_id,
+                   image_path
+            FROM products
+            WHERE site = 'lovisa' AND delivery_version = ? AND {field} IS NULL
+            ORDER BY first_seen
+            """,
+            (LOVISA_DELIVERY_VERSION,),
+        ).fetchall()
+        keys = ["product_id", "name", "price", "url", "image_url", "category", "source_id", "image_path"]
+        return [dict(zip(keys, row), site="lovisa", image_candidates=[row[4]] if row[4] else []) for row in rows]
+
     def mark_delivery_success(self, product_ids, field):
         if field not in {"text_sent_at", "image_sent_at"}:
             raise ValueError(f"Unsupported delivery field: {field}")
@@ -239,6 +283,24 @@ class Store:
         self.conn.execute(
             f"UPDATE products SET {field} = ?, delivery_error = NULL WHERE product_id IN ({placeholders})",
             [now, *product_ids],
+        )
+        self.conn.commit()
+
+    def mark_delivery_complete(self, product_ids):
+        product_ids = list(product_ids)
+        if not product_ids:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        placeholders = ",".join("?" for _ in product_ids)
+        self.conn.execute(
+            f"""
+            UPDATE products
+            SET text_sent_at = COALESCE(text_sent_at, ?),
+                image_sent_at = COALESCE(image_sent_at, ?),
+                delivery_error = NULL
+            WHERE product_id IN ({placeholders})
+            """,
+            [now, now, *product_ids],
         )
         self.conn.commit()
 
@@ -355,10 +417,10 @@ def image_from_entry(entry):
     for size in ("zoom", "big", "medium", "small"):
         source = sources.get(size)
         if source and "no-image" not in source:
-            return source
+            return upgrade_image_url(source) or source
     default_source = entry.get("default_source")
     if default_source and "no-image" not in default_source:
-        return default_source
+        return upgrade_image_url(default_source) or default_source
     return ""
 
 
@@ -464,7 +526,7 @@ def image_url(item):
     for key in ("default_image", "image", "priority_image"):
         value = item.get(key)
         if isinstance(value, str) and value.startswith("http") and "no-image" not in value:
-            return value
+            return upgrade_image_url(value) or value
         if isinstance(value, dict):
             source = image_from_entry(value)
             if source:
@@ -476,10 +538,11 @@ def image_url(item):
             if source:
                 return source
         if color.get("image") and "no-image" not in color.get("image"):
-            return color["image"]
+            return upgrade_image_url(color["image"]) or color["image"]
     product_id = item.get("id") or item.get("variant", "").strip()
     if product_id:
-        return f"https://dam.elcorteingles.es/producto/www-{product_id}-00.jpg?impolicy=Resize&width=967&height=1200"
+        fallback = f"https://dam.elcorteingles.es/producto/www-{product_id}-00.jpg?impolicy=Resize&width=967&height=1200"
+        return upgrade_image_url(fallback) or fallback
     return ""
 
 
@@ -522,8 +585,10 @@ def extract_products_from_payload(payload):
 
 
 def download_image(product, state_dir):
-    image_url = product.get("image_url")
-    if not image_url or image_url.startswith("data:"):
+    image_url = upgrade_image_url(product.get("image_url")) or product.get("image_url")
+    if image_url:
+        product["image_url"] = image_url
+    if not image_url or str(image_url).startswith("data:"):
         return None
     image_dir = Path(state_dir) / "images" / datetime.now().strftime("%Y%m%d")
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -628,6 +693,55 @@ def strip_html(value):
     return normalize_text(unescape(re.sub(r"<[^>]+>", " ", value or "")))
 
 
+_BIJOU_TB_RE = re.compile(r"_tb(?:_\d+x\d+)?(\.[a-z0-9]+)$", re.I)
+_BIJOU_SIZE_RE = re.compile(r"(_\d+x\d+)(\.[a-z0-9]+)$", re.I)
+_SHOPIFY_SIZE_RE = re.compile(
+    r"_(?:pico|icon|thumb|small|compact|medium|large|grande|master|\d+x(?:\d+)?)(\.[a-z0-9]+)$",
+    re.I,
+)
+
+
+def upgrade_image_url(url):
+    url = unescape(str(url or "")).strip()
+    if not url or url.startswith("data:"):
+        return ""
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+
+    if "/thumbnail/" in path or ("bijou-brigitte.com" in host and "/media/" in path):
+        path = path.replace("/thumbnail/", "/media/", 1)
+        path = _BIJOU_TB_RE.sub(r"\1", path)
+        path = _BIJOU_SIZE_RE.sub(r"\2", path)
+        return urlunparse((parsed.scheme or "https", parsed.netloc, path, "", "", ""))
+
+    if "/i/primark/" in path or "amplience.net" in host:
+        base = urlunparse((parsed.scheme or "https", parsed.netloc, path, "", "", ""))
+        if "largedesktop" in (parsed.query or ""):
+            return base + "?" + parsed.query
+        if re.search(r"/\d{9,}_\d+$", path):
+            return base + "?$articleimages-largedesktop$&fmt=auto"
+        return base + "?$productimages-largedesktop$&fmt=auto"
+
+    if "cdn.shopify.com" in host or "shopifycdn" in host:
+        path = _SHOPIFY_SIZE_RE.sub(r"\1", path)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        for key in ("width", "height", "crop"):
+            query.pop(key, None)
+        new_query = urlencode([(key, value) for key, values in query.items() for value in values])
+        return urlunparse((parsed.scheme or "https", parsed.netloc, path, "", new_query, ""))
+
+    if "dam.elcorteingles.es" in host:
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if "impolicy" in query:
+            query["width"] = ["1600"]
+            query.pop("height", None)
+        new_query = urlencode([(key, value) for key, values in query.items() for value in values])
+        return urlunparse((parsed.scheme or "https", parsed.netloc, path, "", new_query, ""))
+
+    return url
+
+
 def unique_site_urls(urls, base_url):
     seen = set()
     unique = []
@@ -635,7 +749,7 @@ def unique_site_urls(urls, base_url):
         url = unescape(str(url or "")).strip()
         if not url or url.startswith("data:"):
             continue
-        url = urljoin(base_url, url)
+        url = upgrade_image_url(urljoin(base_url, url)) or urljoin(base_url, url)
         if url not in seen:
             seen.add(url)
             unique.append(url)
@@ -767,11 +881,15 @@ def refine_product_image(product):
     elif site in {"bershka", "bershka-es"}:
         product["image_url"] = first_white_background_image(candidates, fallback_to_first=False)
     elif site == "lovisa":
-        product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+        product["image_url"] = lovisa_preferred_image(product)
     elif site == "stradivarius":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
     elif site == "primark":
         product["image_url"] = first_white_background_image(candidates) or product.get("image_url", "")
+    if product.get("image_url"):
+        product["image_url"] = upgrade_image_url(product["image_url"]) or product["image_url"]
+    if product.get("image_candidates"):
+        product["image_candidates"] = unique_site_urls(product["image_candidates"], product.get("url") or product.get("image_url") or "")
     return product
 
 
@@ -1297,12 +1415,15 @@ def lovisa_headers(referer=None):
     }
 
 
-def lovisa_products_json_url(base_url):
+def lovisa_products_json_url(base_url, page=1, limit=LOVISA_PAGE_LIMIT):
     parsed = urlparse(base_url or "https://www.lovisa.com/collections/new-arrivals?page=1")
     path = parsed.path.rstrip("/") or "/collections/new-arrivals"
-    query = parse_qs(parsed.query)
-    page = (query.get("page") or ["1"])[0]
-    return urljoin("https://www.lovisa.com/", f"{path}/products.json?limit=250&page={quote(str(page))}")
+    if path.endswith("/products.json"):
+        products_path = path
+    else:
+        products_path = f"{path}/products.json"
+    origin = f"{parsed.scheme or 'https'}://{parsed.netloc or 'www.lovisa.com'}/"
+    return urljoin(origin, f"{products_path}?limit={int(limit)}&page={quote(str(page))}")
 
 
 def lovisa_category_from_name(name):
@@ -1335,10 +1456,10 @@ def lovisa_absolute_image_url(value):
     if not value:
         return ""
     if value.startswith("//"):
-        return "https:" + value
-    if value.startswith("http"):
-        return value
-    return urljoin("https://www.lovisa.com/", value)
+        value = "https:" + value
+    elif not value.startswith("http"):
+        value = urljoin("https://www.lovisa.com/", value)
+    return upgrade_image_url(value) or value
 
 
 def lovisa_image_candidates(product):
@@ -1357,8 +1478,83 @@ def lovisa_image_candidates(product):
             if isinstance(image, dict) and image_id and image.get("id") == image_id:
                 source = lovisa_absolute_image_url(image.get("src") or image.get("url"))
                 if source:
-                    candidates.insert(0, source)
+                    candidates.append(source)
     return unique_site_urls(candidates, "https://www.lovisa.com/")
+
+
+def lovisa_product_json_url(product_url):
+    parsed = urlparse(product_url or "")
+    if not parsed.path:
+        return ""
+    path = parsed.path.rstrip("/")
+    if path.endswith(".js"):
+        return urljoin("https://www.lovisa.com/", path)
+    return urljoin("https://www.lovisa.com/", f"{path}.js")
+
+
+def lovisa_detail_image_candidates(product_url, suppress_errors=False):
+    api_url_value = lovisa_product_json_url(product_url)
+    if not api_url_value:
+        return []
+    try:
+        payload = fetch_json(api_url_value, lovisa_headers(product_url), retries=2)
+    except Exception as exc:
+        if not suppress_errors:
+            print(f"[Lovisa 详情图片失败] {product_url}: {exc}")
+        return []
+    if not isinstance(payload, dict):
+        return []
+    return lovisa_image_candidates(payload)
+
+
+def lovisa_should_fetch_detail_candidates(product):
+    candidates = product.get("image_candidates") or []
+    if not candidates:
+        return True
+    return not first_white_background_image(candidates, fallback_to_first=False)
+
+
+def lovisa_fetch_detail_candidates_for_pending(products, workers=LOVISA_DETAIL_WORKERS):
+    targets = [product for product in products if lovisa_should_fetch_detail_candidates(product)]
+    if not targets:
+        return
+    workers = max(1, min(int(workers or 1), len(targets)))
+    print(f"[Lovisa][详情图] 需要补抓 {len(targets)} 个；并发 {workers}")
+    if workers == 1:
+        for product in targets:
+            product["image_candidates"] = unique_site_urls(
+                (product.get("image_candidates") or []) + lovisa_detail_image_candidates(product.get("url", "")),
+                "https://www.lovisa.com/",
+            )
+        return
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_product = {
+            executor.submit(lovisa_detail_image_candidates, product.get("url", ""), True): product for product in targets
+        }
+        for future in as_completed(future_to_product):
+            product = future_to_product[future]
+            try:
+                detail_candidates = future.result()
+            except Exception as exc:
+                print(f"[Lovisa 详情图片失败] {product.get('url', '')}: {exc}")
+                detail_candidates = []
+            product["image_candidates"] = unique_site_urls(
+                (product.get("image_candidates") or []) + detail_candidates,
+                "https://www.lovisa.com/",
+            )
+
+
+def lovisa_complete_image_candidates(product):
+    return unique_site_urls(
+        (product.get("image_candidates") or []) + lovisa_detail_image_candidates(product.get("url", "")),
+        "https://www.lovisa.com/",
+    )
+
+
+def lovisa_preferred_image(product):
+    candidates = product.get("image_candidates") or []
+    white_image = first_white_background_image(candidates, fallback_to_first=False)
+    return white_image or (candidates[0] if candidates else "")
 
 
 def map_lovisa_product(product, base_url):
@@ -1384,15 +1580,33 @@ def map_lovisa_product(product, base_url):
 
 def scrape_lovisa(config):
     base_url = config.get("base_url") or "https://www.lovisa.com/collections/new-arrivals?page=1"
-    api_url_value = config.get("products_api_url") or lovisa_products_json_url(base_url)
-    payload = fetch_json(api_url_value, lovisa_headers(base_url), retries=3)
-    raw_products = payload.get("products") or []
-    products = [map_lovisa_product(product, base_url) for product in raw_products]
-    products = [product for product in products if product.get("product_id") and product.get("name") and product.get("image_url")]
+    api_base_url = config.get("products_api_url") or base_url
     unique = {}
-    for product in products:
-        unique[product["product_id"]] = product
+    previous_page_signature = None
+    for page in range(1, LOVISA_MAX_PAGES + 1):
+        api_url_value = lovisa_products_json_url(api_base_url, page=page)
+        payload = fetch_json(api_url_value, lovisa_headers(base_url), retries=3)
+        if not isinstance(payload, dict) or "products" not in payload or not isinstance(payload["products"], list):
+            raise RuntimeError(f"Lovisa products.json 第 {page} 页结构异常")
+        raw_products = payload["products"]
+        print(f"[分页] Lovisa New Arrivals: 第 {page} 页，原始商品 {len(raw_products)} 个")
+        if not raw_products:
+            if page == 1:
+                raise RuntimeError("Lovisa products.json 第 1 页返回空商品")
+            break
+        page_signature = tuple(str(product.get("id") or product.get("handle") or "") for product in raw_products)
+        if page_signature == previous_page_signature:
+            raise RuntimeError(f"Lovisa products.json 第 {page} 页与上一页完全重复")
+        previous_page_signature = page_signature
+        for raw_product in raw_products:
+            product = map_lovisa_product(raw_product, base_url)
+            if product.get("product_id") and product.get("name"):
+                unique[product["product_id"]] = product
+    else:
+        raise RuntimeError(f"Lovisa products.json 超过安全分页上限 {LOVISA_MAX_PAGES}")
     products = list(unique.values())
+    if not products:
+        raise RuntimeError("Lovisa products.json 未映射出有效商品")
     counts = {category: len(items) for category, items in group_by_category(products).items()}
     print(f"[结果] Lovisa New Arrivals: New {len(products)} 个；分类 {json.dumps(counts, ensure_ascii=False)}")
     return products
@@ -1847,6 +2061,22 @@ def primark_fetch_html(url, session, referer):
         return html_text
 
 
+def primark_iter_image_values(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        inner = value.get("url") or value.get("contentUrl") or value.get("src") or ""
+        return [inner] if inner else []
+    if isinstance(value, list):
+        urls = []
+        for item in value:
+            urls.extend(primark_iter_image_values(item))
+        return urls
+    return []
+
+
 def primark_ldjson_products(html_text):
     for match in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', html_text, re.I | re.S):
         payload = normalize_text(match.group(1))
@@ -1868,14 +2098,14 @@ def primark_products_from_html(html_text):
         item = row.get("item") or {}
         offers = item.get("offers") or {}
         price = offers.get("price") or offers.get("lowPrice") or offers.get("highPrice") or ""
-        image = item.get("image") or ""
+        images = primark_iter_image_values(item.get("image"))
         products.append(
             {
                 "url": item.get("url") or "",
                 "name": normalize_text(item.get("name") or ""),
                 "price": f"${price}" if price and not str(price).startswith("$") else str(price or ""),
-                "image_url": image,
-                "image_candidates": [image] if image else [],
+                "image_url": images[0] if images else "",
+                "image_candidates": images,
                 "source_id": item.get("sku") or "",
             }
         )
@@ -2361,7 +2591,74 @@ def build_zip_bundle_message(products, category_counts, site_url, site_name="Sfe
     return "\n".join(lines)
 
 
-def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO"):
+def share_site_folder_name(site_key, config=None):
+    folders = (config or {}).get("share_site_folders") or DEFAULT_SHARE_SITE_FOLDERS
+    return folders.get(site_key) or folders.get((site_key or "").split("-")[0])
+
+
+def share_archive_root(config, site_key):
+    folder = share_site_folder_name(site_key, config)
+    root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    if not folder or not root:
+        return None
+    return Path(root) / folder
+
+
+def share_run_dir_name(site_name, product_count, day=None):
+    today = (day or datetime.now()).strftime("%Y%m%d")
+    site_slug = safe_filename(site_name, "site").replace(" ", "_")
+    return f"{site_slug}_网站上新_{product_count}款_{today}"
+
+
+def share_category_from_zip_name(zip_path, site_name=""):
+    stem = Path(zip_path).stem
+    site_slug = safe_filename(site_name, "site").replace(" ", "_") if site_name else ""
+    rest = stem
+    if site_slug and rest.startswith(f"{site_slug}_"):
+        rest = rest[len(site_slug) + 1 :]
+    match = re.match(r"(.+?)_\d+款(?:_|$)", rest)
+    if match:
+        return safe_filename(match.group(1), "未分类")
+    return "未分类"
+
+
+def share_archive_zip_name(zip_path, day=None):
+    path = Path(zip_path)
+    stamp = (day or datetime.now()).strftime("%Y%m%d")
+    if stamp in path.stem:
+        return path.name
+    return f"{path.stem}_{stamp}{path.suffix}"
+
+
+def copy_zips_to_share(zip_paths, config, site_key, site_name, product_count=None, day=None, categories=None):
+    archive_root = share_archive_root(config, site_key)
+    if not archive_root:
+        return {"copied": [], "dir": "", "skipped": "no-share-folder"}
+    zip_paths = [Path(path) for path in zip_paths if path and Path(path).exists()]
+    if not zip_paths:
+        return {"copied": [], "dir": "", "skipped": "no-zips"}
+    try:
+        copied = []
+        copied_dirs = []
+        for index, zip_path in enumerate(zip_paths):
+            category = None
+            if categories and index < len(categories) and categories[index]:
+                category = categories[index]
+            category_name = safe_filename(category or share_category_from_zip_name(zip_path, site_name), "未分类")
+            category_dir = archive_root / category_name
+            category_dir.mkdir(parents=True, exist_ok=True)
+            target = category_dir / share_archive_zip_name(zip_path, day)
+            shutil.copy2(str(zip_path), str(target))
+            copied.append(str(target))
+            copied_dirs.append(str(category_dir))
+        print(f"[共享盘] {site_name} 已拷贝 {len(copied)} 个压缩包到 {archive_root}")
+        return {"copied": copied, "dir": str(archive_root), "dirs": copied_dirs}
+    except Exception as exc:
+        print(f"[共享盘] {site_name} 拷贝失败，不影响企业微信已发送状态：{exc}")
+        return {"copied": [], "dir": str(archive_root), "error": str(exc)}
+
+
+def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO", config=None, site_key=""):
     max_bytes = 19 * 1024 * 1024
     master_zip, category_zips, category_counts, bundle_root = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
     zip_targets = []
@@ -2379,13 +2676,30 @@ def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfe
         file_result = send_wecom_file(webhook, zip_target)
         sent_files.append({"path": str(zip_target), "result": file_result})
     ok = text_result.get("errcode") == 0 and all(item["result"].get("errcode") == 0 for item in sent_files)
+    share_result = {}
     if ok:
+        share_files = category_zips if zip_targets == [master_zip] else zip_targets
+        share_categories = [category for category, _ in category_counts] if zip_targets == [master_zip] else None
+        share_result = copy_zips_to_share(
+            share_files,
+            config or {},
+            site_key,
+            site_name,
+            len(products),
+            categories=share_categories,
+        )
         for cleanup_root in cleanup_roots:
             shutil.rmtree(cleanup_root, ignore_errors=True)
         cleanup = "deleted"
     else:
         cleanup = "kept"
-    return {"message": text_result, "files": sent_files, "zip": str(zip_targets[0]) if zip_targets else str(master_zip), "cleanup": cleanup}
+    return {
+        "message": text_result,
+        "files": sent_files,
+        "zip": str(zip_targets[0]) if zip_targets else str(master_zip),
+        "cleanup": cleanup,
+        "share": share_result,
+    }
 
 
 def build_bijou_text_message(products, site_url):
@@ -2403,6 +2717,76 @@ def build_bijou_text_message(products, site_url):
         lines.append(f"- [{product.get('name') or source_id}]({product.get('url') or site_url}){f'｜{details}' if details else ''}")
     lines.extend(["", "> 图片暂时无法获取的商品也会先提醒；系统将在后续定时任务中持续补图，成功后只发送图片包，不重复发送本条文字。"])
     return "\n".join(lines)
+
+
+def bijou_message_size(message):
+    return len(message.encode("utf-8"))
+
+
+def split_bijou_text_batches(products, site_url, max_bytes=3900):
+    parts = []
+    current = []
+    for product in products:
+        candidate = current + [product]
+        message = "\n".join(build_bijou_text_message(candidate, site_url).split("\n")[:-1] + ["> 图片暂时无法获取的商品也会先提醒；系统将在后续定时任务中持续补图，成功后只发送图片包，不重复发送本条文字。"])
+        if current and bijou_message_size(message) > max_bytes:
+            parts.append(current)
+            current = [product]
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def lovisa_text_message_lines(products, site_url, part_index=1, part_total=1):
+    today = datetime.now().strftime("%Y-%m-%d")
+    title = "**Lovisa 网站产品上新提醒**" if part_total == 1 else f"**Lovisa 网站产品上新提醒（第 {part_index}/{part_total} 条）**"
+    lines = [
+        title,
+        f"> 日期：{today}",
+        f"> 网站：{site_url}",
+        f"> 本次新增 New 商品：{len(products)} 款" if part_total == 1 else f"> 本条商品：{len(products)} 款",
+        "",
+    ]
+    for product in products:
+        source_id = product.get("source_id") or product.get("product_id", "").removeprefix("lovisa:")
+        details = "｜".join(part for part in [source_id, product.get("category", ""), product.get("price", "")] if part)
+        name = product.get("name") or source_id
+        url = product.get("url") or site_url
+        lines.append(f"- [{name}]({url}){f'｜{details}' if details else ''}")
+    lines.extend(["", "> 无图商品也会先发送文字提醒；系统将在后续定时任务中持续补图，成功后只发送图片包，不重复发送本条文字。"])
+    return lines
+
+
+def build_lovisa_text_message(products, site_url):
+    return "\n".join(lovisa_text_message_lines(products, site_url))
+
+
+def lovisa_message_size(message):
+    return len(message.encode("utf-8"))
+
+
+def split_lovisa_text_batches(products, site_url, max_bytes=LOVISA_WECOM_MARKDOWN_LIMIT):
+    parts = []
+    current = []
+    for product in products:
+        candidate = current + [product]
+        message = "\n".join(lovisa_text_message_lines(candidate, site_url))
+        if current and lovisa_message_size(message) > max_bytes:
+            parts.append(current)
+            current = [product]
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def split_lovisa_text_messages(products, site_url, max_bytes=LOVISA_WECOM_MARKDOWN_LIMIT):
+    parts = split_lovisa_text_batches(products, site_url, max_bytes)
+    total = len(parts) or 1
+    return ["\n".join(lovisa_text_message_lines(part, site_url, index, total)) for index, part in enumerate(parts, 1)]
 
 
 def prepare_bijou_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
@@ -2423,6 +2807,32 @@ def prepare_bijou_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
     outputs = []
     for index, package in enumerate(packages, 1):
         zip_path = bundle_root / f"Bijou_Brigitte_待补图片_{len(package)}款_第{index}包.zip"
+        write_zip_from_paths(zip_path, [item["image_path"] for item in package])
+        outputs.append((zip_path, [item["product"] for item in package]))
+    return bundle_root, outputs, prepared
+
+
+def prepare_lovisa_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
+    bundle_root, image_dir, prepared = prepare_zip_images(products, state_dir, "Lovisa")
+    packages = []
+    current = []
+    safe_limit = max_bytes - 512 * 1024
+    for item in prepared:
+        candidate = current + [item]
+        trial_path = bundle_root / "Lovisa_trial.zip"
+        write_zip_from_paths(trial_path, [row["image_path"] for row in candidate])
+        trial_size = trial_path.stat().st_size
+        trial_path.unlink()
+        if current and trial_size > safe_limit:
+            packages.append(current)
+            current = [item]
+        else:
+            current = candidate
+    if current:
+        packages.append(current)
+    outputs = []
+    for index, package in enumerate(packages, 1):
+        zip_path = bundle_root / f"Lovisa_待补图片_{len(package)}款_第{index}包.zip"
         write_zip_from_paths(zip_path, [item["image_path"] for item in package])
         outputs.append((zip_path, [item["product"] for item in package]))
     return bundle_root, outputs, prepared
@@ -2798,11 +3208,6 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
     for product in image_pending:
         try:
             refine_product_image(product)
-            product["image_candidates"] = unique_urls(
-                [product.get("image_url")] + bijou_detail_image_candidates(product.get("url", ""), product.get("source_id", ""))
-            )
-            if product["image_candidates"]:
-                product["image_url"] = product["image_candidates"][0]
             product["image_path"] = download_image(product, config["state_dir"])
             if product.get("image_path"):
                 image_ready.append(product)
@@ -2825,10 +3230,108 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
                 package_ids = [product["product_id"] for product in package_products]
                 store.mark_delivery_success(package_ids, "image_sent_at")
                 delivered_ids.extend(package_ids)
+            if delivered_ids:
+                copy_zips_to_share(
+                    [zip_path for zip_path, _ in packages],
+                    config,
+                    "bijou",
+                    site_name,
+                    len(delivered_ids),
+                )
         finally:
             if set(delivered_ids) == prepared_ids:
                 shutil.rmtree(bundle_root, ignore_errors=True)
     print(f"[Bijou][交付] 图片成功 {len(delivered_ids)} 个；仍待补发 {len(image_pending) - len(delivered_ids)} 个")
+    return text_pending
+
+
+def merge_current_products(pending, products):
+    current = {product["product_id"]: product for product in products}
+    merged = []
+    for stored in pending:
+        latest = current.get(stored["product_id"])
+        if latest:
+            combined = dict(stored)
+            combined.update(latest)
+            combined["image_candidates"] = unique_site_urls(
+                (latest.get("image_candidates") or []) + ([stored.get("image_url")] if stored.get("image_url") else []),
+                "https://www.lovisa.com/",
+            )
+            merged.append(combined)
+        else:
+            merged.append(stored)
+    return merged
+
+
+def process_lovisa(config, store, args, products, site_url, site_name, marker):
+    for product in products:
+        product.setdefault("site", "lovisa")
+        store.mark_seen(product, delivery_version=LOVISA_DELIVERY_VERSION)
+    if args.baseline_only:
+        store.mark_delivery_complete([product["product_id"] for product in products])
+        print(f"[基线] {site_name} 仅记录本次商品状态，不下载图片、不发送新增商品包。")
+        return []
+
+    text_pending = merge_current_products(store.lovisa_delivery_pending("text_sent_at"), products)
+    print(f"[Lovisa][交付] 文字待发送 {len(text_pending)} 个")
+    if text_pending:
+        text_batches = split_lovisa_text_batches(text_pending, site_url)
+        for index, batch in enumerate(text_batches, 1):
+            message = "\n".join(lovisa_text_message_lines(batch, site_url, index, len(text_batches)))
+            result = send_wecom(config["wecom_webhook"], message)
+            if result.get("errcode") != 0:
+                raise RuntimeError(f"Lovisa 文字提醒发送失败（第 {index}/{len(text_batches)} 条）：{result}")
+            store.mark_delivery_success([product["product_id"] for product in batch], "text_sent_at")
+        print(f"[Lovisa][交付] 文字发送成功 {len(text_pending)} 个，共 {len(text_batches)} 条")
+
+    image_pending = merge_current_products(store.lovisa_delivery_pending("image_sent_at"), products)
+    print(f"[Lovisa][交付] 图片待补发 {len(image_pending)} 个")
+    if not config.get("download_images", True):
+        print("[Lovisa][交付] 图片下载已禁用，待补图片将在后续运行继续处理。")
+        return text_pending
+    detail_workers = config.get("detail_workers") or config.get("lovisa_detail_workers") or LOVISA_DETAIL_WORKERS
+    lovisa_fetch_detail_candidates_for_pending(image_pending, detail_workers)
+    image_ready = []
+    for product in image_pending:
+        try:
+            refine_product_image(product)
+            if not product.get("image_url"):
+                store.record_image_result(product, "No downloadable image URL found")
+                continue
+            product["image_path"] = download_image(product, config["state_dir"])
+            if product.get("image_path"):
+                image_ready.append(product)
+                store.record_image_result(product)
+            else:
+                store.record_image_result(product, "No downloadable image URL found")
+        except Exception as exc:
+            store.record_image_result(product, str(exc))
+            print(f"[Lovisa][补图失败] {product.get('source_id')} {product.get('name')}: {exc}")
+
+    delivered_ids = []
+    if image_ready:
+        bundle_root, packages, prepared = prepare_lovisa_image_zips(image_ready, config["state_dir"])
+        prepared_ids = {item["product"]["product_id"] for item in prepared}
+        try:
+            for zip_path, package_products in packages:
+                result = send_wecom_file(config["wecom_webhook"], zip_path)
+                if result.get("errcode") != 0:
+                    raise RuntimeError(f"Lovisa 图片包发送失败：{result}")
+                package_ids = [product["product_id"] for product in package_products]
+                store.mark_delivery_success(package_ids, "image_sent_at")
+                delivered_ids.extend(package_ids)
+            if delivered_ids:
+                copy_zips_to_share(
+                    [zip_path for zip_path, _ in packages],
+                    config,
+                    "lovisa",
+                    site_name,
+                    len(delivered_ids),
+                )
+        finally:
+            if set(delivered_ids) == prepared_ids:
+                shutil.rmtree(bundle_root, ignore_errors=True)
+    print(f"[Lovisa][交付] 图片成功 {len(delivered_ids)} 个；仍待补发 {len(image_pending) - len(delivered_ids)} 个")
     return text_pending
 
 
@@ -2843,8 +3346,11 @@ def process_site(site_key, config, store, args):
         report = build_bijou_audit_report(store, products)
         print_bijou_audit_report(report)
         return products, []
-    if site_key == "bijou":
-        new_products = process_bijou(config, store, args, products, site_url, site_name, marker)
+    if site_key in {"bijou", "lovisa"}:
+        if site_key == "bijou":
+            new_products = process_bijou(config, store, args, products, site_url, site_name, marker)
+        else:
+            new_products = process_lovisa(cfg, store, args, products, site_url, site_name, marker)
         snapshot_path = Path(config["state_dir"]) / f"snapshot_{site_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         snapshot_path.write_text(json.dumps(products, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[汇总] {site_name} {marker} 商品 {len(products)} 个；文字新增提醒 {len(new_products)} 个。")
@@ -2881,6 +3387,8 @@ def process_site(site_key, config, store, args):
                 site_url,
                 site_name,
                 marker,
+                config=cfg,
+                site_key=site_key,
             )
         else:
             result = send_wecom(
