@@ -137,7 +137,7 @@ GitHub 发企业微信成功后，压缩包会提交到仓库 `share-inbox/<网�
 python sfera_monitor.py --sync-share
 ```
 
-或用 `scripts/sync_share_inbox.ps1`。本机任务只拷盘，不抓网站、不发企业微信。电脑开机后才会把暂存包落到图片库。
+或用 `scripts/sync_share_inbox.ps1`。本机任务 `Sfera-ShareInbox-Sync` 每天 10:17 只拷盘，不抓网站、不发企业微信；拷成功后会把已清空的 `share-inbox` 推回仓库。电脑关机不会补拷。
 
 ### 必须设置 Secret
 

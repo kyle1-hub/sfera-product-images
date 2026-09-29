@@ -13,4 +13,14 @@ if ($LASTEXITCODE -ne 0) {
 
 $python = (Get-Command python -ErrorAction Stop).Source
 & $python sfera_monitor.py --sync-share
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+git add -u -- share-inbox
+git add -- share-inbox/.gitkeep
+if (-not (git diff --cached --quiet -- share-inbox)) {
+    git -c user.name="share-inbox-sync" -c user.email="share-inbox-sync@local" commit -m "Clear copied share-inbox zips [skip ci]"
+    git pull --rebase origin main
+    git push origin HEAD:main
+}
