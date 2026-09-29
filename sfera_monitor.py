@@ -335,6 +335,32 @@ class Store:
         )
         self.conn.commit()
 
+    def products_delivered_on(self, day_prefix, field="image_sent_at"):
+        if field not in {"text_sent_at", "image_sent_at"}:
+            raise ValueError(f"Unsupported delivery field: {field}")
+        rows = self.conn.execute(
+            f"""
+            SELECT product_id, name, price, url, image_url, category, site,
+                   COALESCE(NULLIF(source_id, ''), '') AS source_id, image_path
+            FROM products
+            WHERE (
+                site IN ('bijou', 'lovisa') AND {field} LIKE ?
+            ) OR (
+                IFNULL(site, '') NOT IN ('bijou', 'lovisa') AND first_seen LIKE ?
+            )
+            ORDER BY site, category, product_id
+            """,
+            (f"{day_prefix}%", f"{day_prefix}%"),
+        ).fetchall()
+        keys = ["product_id", "name", "price", "url", "image_url", "category", "site", "source_id", "image_path"]
+        products = []
+        for row in rows:
+            item = dict(zip(keys, row))
+            if item.get("image_url"):
+                item["image_candidates"] = [item["image_url"]]
+            products.append(item)
+        return products
+
 
 def normalize_text(value):
     return re.sub(r"\s+", " ", value or "").strip()
@@ -2605,6 +2631,17 @@ def share_site_folder_name(site_key, config=None):
     return folders.get(site_key) or folders.get((site_key or "").split("-")[0])
 
 
+def is_windows_unc_path(path):
+    text = str(path or "").replace("/", "\\")
+    return text.startswith("\\\\")
+
+
+def can_write_share_library(root):
+    if is_windows_unc_path(root) and os.name != "nt":
+        return False
+    return True
+
+
 def share_archive_root(config, site_key):
     folder = share_site_folder_name(site_key, config)
     root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
@@ -2643,6 +2680,10 @@ def copy_zips_to_share(zip_paths, config, site_key, site_name, product_count=Non
     archive_root = share_archive_root(config, site_key)
     if not archive_root:
         return {"copied": [], "dir": "", "skipped": "no-share-folder"}
+    library_root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    if not can_write_share_library(library_root):
+        print(f"[共享盘] {site_name} 当前环境写不了 UNC，改走仓库暂存")
+        return {"copied": [], "dir": str(archive_root), "error": "unc-not-reachable"}
     zip_paths = [Path(path) for path in zip_paths if path and Path(path).exists()]
     if not zip_paths:
         return {"copied": [], "dir": "", "skipped": "no-zips"}
@@ -2729,7 +2770,11 @@ def prune_empty_dirs(path, stop_at):
 
 def sync_share_inbox(config):
     inbox = share_inbox_root(config)
-    library = Path((config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT)
+    library_root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    if not can_write_share_library(library_root):
+        print("[共享盘同步] 当前环境写不了 UNC，跳过")
+        return {"copied": [], "skipped": "unc-not-reachable"}
+    library = Path(library_root)
     if not inbox.exists():
         print("[共享盘同步] 暂存目录为空")
         return {"copied": [], "skipped": "no-inbox"}
@@ -2749,6 +2794,99 @@ def sync_share_inbox(config):
             print(f"[共享盘同步] 拷贝失败 {zip_path.name}：{exc}")
     print(f"[共享盘同步] 已拷贝 {len(copied)} 个压缩包到 {library}")
     return {"copied": copied, "errors": errors, "dir": str(library)}
+
+
+def parse_archive_day(value):
+    text = str(value or "").strip().lower()
+    if not text or text == "today":
+        return datetime.now()
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"无法解析日期：{value}")
+
+
+def prepare_ready_images(products, state_dir):
+    ready = []
+    for product in products:
+        try:
+            local_path = product.get("image_path")
+            if local_path and Path(local_path).exists():
+                ready.append(product)
+                continue
+            refine_product_image(product)
+            if not product.get("image_url"):
+                print(f"[补拷] 无图跳过 {product.get('site')} {product.get('name') or product.get('product_id')}")
+                continue
+            product["image_path"] = download_image(product, state_dir)
+            if product.get("image_path") and Path(product["image_path"]).exists():
+                ready.append(product)
+            else:
+                print(f"[补拷] 下载失败 {product.get('site')} {product.get('name') or product.get('product_id')}")
+        except Exception as exc:
+            print(f"[补拷] {product.get('site')} {product.get('name') or product.get('product_id')}: {exc}")
+    return ready
+
+
+def archive_ready_products(config, site_key, products, day=None):
+    if not products:
+        return {"copied": [], "skipped": "no-products"}
+    meta = SITE_META.get(site_key) or {}
+    site_name = meta.get("display_name") or site_key
+    marker = meta.get("marker") or "NEW"
+    state_dir = config["state_dir"]
+    ready = prepare_ready_images(products, state_dir)
+    if not ready:
+        print(f"[补拷] {site_name} 没有可打包图片")
+        return {"copied": [], "skipped": "no-images"}
+    bundle_root = None
+    try:
+        if site_key == "bijou":
+            bundle_root, packages, _prepared = prepare_bijou_image_zips(ready, state_dir)
+            zip_paths = [zip_path for zip_path, _products in packages]
+            categories = None
+        elif site_key == "lovisa":
+            bundle_root, packages, _prepared = prepare_lovisa_image_zips(ready, state_dir)
+            zip_paths = [zip_path for zip_path, _products in packages]
+            categories = None
+        else:
+            _master, category_zips, category_counts, bundle_root = build_product_zip_bundle(
+                ready, state_dir, meta.get("base_url") or "", site_name, marker
+            )
+            zip_paths = category_zips
+            categories = [category for category, _count in category_counts]
+        result = archive_sent_zips(
+            zip_paths,
+            config,
+            site_key,
+            site_name,
+            len(ready),
+            day=day,
+            categories=categories,
+        )
+        print(f"[补拷] {site_name} {len(ready)} 款 -> copied={len(result.get('copied') or [])} inbox={len(result.get('inbox') or [])}")
+        return result
+    finally:
+        if bundle_root:
+            shutil.rmtree(bundle_root, ignore_errors=True)
+
+
+def archive_sent_day(config, store, day):
+    prefix = day.strftime("%Y-%m-%d")
+    products = store.products_delivered_on(prefix)
+    grouped = {}
+    for product in products:
+        grouped.setdefault(product.get("site") or "unknown", []).append(product)
+    print(f"[补拷] {prefix} 已发送图片 {len(products)} 款，网站 {len(grouped)} 个")
+    results = {}
+    for site_key, site_products in grouped.items():
+        if site_key not in SITE_META:
+            print(f"[补拷] 跳过未知站点 {site_key} {len(site_products)} 款")
+            continue
+        results[site_key] = archive_ready_products(config, site_key, site_products, day=day)
+    return {"day": prefix, "count": len(products), "sites": results}
 
 
 def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO", config=None, site_key=""):
@@ -3285,12 +3423,16 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
     text_pending = store.bijou_delivery_pending("text_sent_at")
     print(f"[Bijou][交付] 文字待发送 {len(text_pending)} 个")
     if text_pending:
-        message = f"Bijou /neu/ 新增 {len(text_pending)} 款，图片包即将发送"
-        result = send_wecom(config["wecom_webhook"], message)
-        if result.get("errcode") != 0:
-            raise RuntimeError(f"Bijou 文字提醒发送失败：{result}")
-        store.mark_delivery_success([product["product_id"] for product in text_pending], "text_sent_at")
-        print(f"[Bijou][交付] 文字发送成功 {len(text_pending)} 个")
+        if getattr(args, "no_wecom", False):
+            store.mark_delivery_success([product["product_id"] for product in text_pending], "text_sent_at")
+            print(f"[Bijou][交付] 跳过企业微信，文字已记 {len(text_pending)} 个")
+        else:
+            message = f"Bijou /neu/ 新增 {len(text_pending)} 款，图片包即将发送"
+            result = send_wecom(config["wecom_webhook"], message)
+            if result.get("errcode") != 0:
+                raise RuntimeError(f"Bijou 文字提醒发送失败：{result}")
+            store.mark_delivery_success([product["product_id"] for product in text_pending], "text_sent_at")
+            print(f"[Bijou][交付] 文字发送成功 {len(text_pending)} 个")
 
     image_pending = store.bijou_delivery_pending("image_sent_at")
     print(f"[Bijou][交付] 图片待补发 {len(image_pending)} 个")
@@ -3317,9 +3459,10 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
         prepared_ids = {item["product"]["product_id"] for item in prepared}
         try:
             for zip_path, package_products in packages:
-                result = send_wecom_file(config["wecom_webhook"], zip_path)
-                if result.get("errcode") != 0:
-                    raise RuntimeError(f"Bijou 图片包发送失败：{result}")
+                if not getattr(args, "no_wecom", False):
+                    result = send_wecom_file(config["wecom_webhook"], zip_path)
+                    if result.get("errcode") != 0:
+                        raise RuntimeError(f"Bijou 图片包发送失败：{result}")
                 package_ids = [product["product_id"] for product in package_products]
                 store.mark_delivery_success(package_ids, "image_sent_at")
                 delivered_ids.extend(package_ids)
@@ -3370,12 +3513,18 @@ def process_lovisa(config, store, args, products, site_url, site_name, marker):
     if text_pending:
         text_batches = split_lovisa_text_batches(text_pending, site_url)
         for index, batch in enumerate(text_batches, 1):
+            if getattr(args, "no_wecom", False):
+                store.mark_delivery_success([product["product_id"] for product in batch], "text_sent_at")
+                continue
             message = "\n".join(lovisa_text_message_lines(batch, site_url, index, len(text_batches)))
             result = send_wecom(config["wecom_webhook"], message)
             if result.get("errcode") != 0:
                 raise RuntimeError(f"Lovisa 文字提醒发送失败（第 {index}/{len(text_batches)} 条）：{result}")
             store.mark_delivery_success([product["product_id"] for product in batch], "text_sent_at")
-        print(f"[Lovisa][交付] 文字发送成功 {len(text_pending)} 个，共 {len(text_batches)} 条")
+        if getattr(args, "no_wecom", False):
+            print(f"[Lovisa][交付] 跳过企业微信，文字已记 {len(text_pending)} 个")
+        else:
+            print(f"[Lovisa][交付] 文字发送成功 {len(text_pending)} 个，共 {len(text_batches)} 条")
 
     image_pending = merge_current_products(store.lovisa_delivery_pending("image_sent_at"), products)
     print(f"[Lovisa][交付] 图片待补发 {len(image_pending)} 个")
@@ -3407,9 +3556,10 @@ def process_lovisa(config, store, args, products, site_url, site_name, marker):
         prepared_ids = {item["product"]["product_id"] for item in prepared}
         try:
             for zip_path, package_products in packages:
-                result = send_wecom_file(config["wecom_webhook"], zip_path)
-                if result.get("errcode") != 0:
-                    raise RuntimeError(f"Lovisa 图片包发送失败：{result}")
+                if not getattr(args, "no_wecom", False):
+                    result = send_wecom_file(config["wecom_webhook"], zip_path)
+                    if result.get("errcode") != 0:
+                        raise RuntimeError(f"Lovisa 图片包发送失败：{result}")
                 package_ids = [product["product_id"] for product in package_products]
                 store.mark_delivery_success(package_ids, "image_sent_at")
                 delivered_ids.extend(package_ids)
@@ -3472,7 +3622,13 @@ def process_site(site_key, config, store, args):
     print(f"[汇总] {site_name} {marker} 商品 {len(products)} 个；本次新增 {len(new_products)} 个。")
     print(f"[快照] {snapshot_path}")
     if not args.baseline_only and (args.send or new_products or config.get("send_empty_report", False)):
-        if new_products:
+        if getattr(args, "no_wecom", False):
+            if new_products:
+                result = archive_ready_products(cfg, site_key, new_products)
+                print(f"[补拷] {site_name} {json.dumps(result, ensure_ascii=False, default=str)}")
+            else:
+                print(f"[补拷] {site_name} 本次无新增，跳过企业微信")
+        elif new_products:
             result = send_wecom_zip_bundle(
                 config["wecom_webhook"],
                 new_products,
@@ -3483,12 +3639,13 @@ def process_site(site_key, config, store, args):
                 config=cfg,
                 site_key=site_key,
             )
+            print(f"[企业微信] {site_name} {json.dumps(result, ensure_ascii=False)}")
         else:
             result = send_wecom(
                 config["wecom_webhook"],
                 build_message(new_products, site_url, site_name, marker),
             )
-        print(f"[企业微信] {site_name} {json.dumps(result, ensure_ascii=False)}")
+            print(f"[企业微信] {site_name} {json.dumps(result, ensure_ascii=False)}")
     return products, new_products
 
 
@@ -3504,6 +3661,12 @@ def run(args):
         result = sync_share_inbox(config)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if result.get("errors") else 0
+    if getattr(args, "archive_sent_day", None):
+        store = Store(config["state_dir"], read_only=True)
+        day = parse_archive_day(args.archive_sent_day)
+        result = archive_sent_day(config, store, day)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
 
     store = Store(config["state_dir"], read_only=args.audit_only)
     failures = []
@@ -3520,6 +3683,8 @@ def main():
     parser = argparse.ArgumentParser(description="Sfera NUEVO product monitor")
     parser.add_argument("--test-wecom", action="store_true", help="send a WeCom test message only")
     parser.add_argument("--sync-share", action="store_true", help="copy GitHub share-inbox zips onto the photo library share and do not send WeCom")
+    parser.add_argument("--archive-sent-day", nargs="?", const="today", default=None, help="rebuild already-sent image zips for a day onto the photo library; do not send WeCom")
+    parser.add_argument("--no-wecom", action="store_true", help="scrape and archive zips without sending WeCom")
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")

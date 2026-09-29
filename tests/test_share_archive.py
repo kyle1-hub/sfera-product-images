@@ -63,6 +63,33 @@ class ShareArchiveTests(unittest.TestCase):
             )
         self.assertEqual(result["skipped"], "no-share-folder")
 
+    def test_copy_skips_unc_on_non_windows(self):
+        unc = r"\\192.168.10.254\alpha_share\library"
+        self.assertTrue(MONITOR.is_windows_unc_path(unc))
+        with patch.object(MONITOR, "can_write_share_library", return_value=False):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                source = Path(temp_dir) / "Sfera_ANILLOS_1款_NUEVO.zip"
+                source.write_bytes(b"zip")
+                inbox = Path(temp_dir) / "inbox"
+                config = {
+                    "share_library_root": unc,
+                    "share_site_folders": {"sfera": "E03-SFERA"},
+                    "share_inbox_dir": str(inbox),
+                }
+                result = MONITOR.archive_sent_zips(
+                    [source],
+                    config,
+                    "sfera",
+                    "Sfera",
+                    1,
+                    day=datetime(2026, 9, 29),
+                )
+                stashed = inbox / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+                self.assertTrue(stashed.exists())
+                self.assertEqual(result["copied"], [])
+                self.assertEqual(result["error"], "unc-not-reachable")
+                self.assertEqual(result["inbox"], [str(stashed)])
+
     def test_copy_failure_does_not_raise(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "pack.zip"

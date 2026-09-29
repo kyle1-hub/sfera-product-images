@@ -131,13 +131,19 @@ Primark：每天 01:57 UTC，也就是北京时间 09:57
 
 公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。
 
-GitHub 发企业微信成功后，压缩包会提交到仓库 `share-inbox/<网站文件夹>/<品类>/`。这台能连内网盘的电脑再跑：
+GitHub 发企业微信成功后，压缩包会提交到仓库 `share-inbox/<网站文件夹>/<品类>/`。Ubuntu runner 写不了内网 UNC，不会再把 `\\192...` 当成本地拷贝成功。这台能连内网盘的电脑再跑：
 
 ```powershell
 python sfera_monitor.py --sync-share
 ```
 
-或用 `scripts/sync_share_inbox.ps1`。本机任务 `Sfera-ShareInbox-Sync` 每天 10:17 只拷盘，不抓网站、不发企业微信；拷成功后会把已清空的 `share-inbox` 推回仓库。电脑关机不会补拷。
+或用 `scripts/sync_share_inbox.ps1`。本机任务 `Sfera-ShareInbox-Sync` 每天 10:17 只拷盘，不抓网站、不发企业微信；拷成功后会把已清空的 `share-inbox` 推回仓库。电脑关机不会补拷。漏拷某天可用：
+
+```powershell
+python sfera_monitor.py --archive-sent-day 2026-09-29
+```
+
+只按当天已发送记录重打包落盘，不发企业微信。
 
 ### 必须设置 Secret
 

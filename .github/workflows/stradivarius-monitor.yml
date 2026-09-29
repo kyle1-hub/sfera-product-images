@@ -48,5 +48,6 @@ jobs:
             echo "No state changes to commit."
           else
             git commit -m "Update Stradivarius monitor state [skip ci]"
+            git pull --rebase origin main
             git push
           fi
