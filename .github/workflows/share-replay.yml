@@ -1,0 +1,52 @@
+name: Replay Share Archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Day to rebuild already-sent zips, YYYY-MM-DD"
+        required: true
+        default: "2026-09-29"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: share-archive-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    name: Rebuild sent zips into share-inbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild sent zips without WeCom
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python sfera_monitor.py --archive-sent-day ${{ inputs.day }}
+
+      - name: Commit share-inbox
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f share-inbox || true
+          if git diff --cached --quiet; then
+            echo "No share-inbox changes to commit."
+          else
+            git commit -m "Stash rebuilt share zips for ${{ inputs.day }} [skip ci]"
+            git pull --rebase origin main
+            git push
+          fi

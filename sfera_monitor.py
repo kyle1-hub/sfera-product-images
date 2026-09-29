@@ -2816,7 +2816,8 @@ def prepare_ready_images(products, state_dir):
             if local_path and Path(local_path).exists():
                 ready.append(product)
                 continue
-            refine_product_image(product)
+            if not product.get("image_url"):
+                refine_product_image(product)
             if not product.get("image_url"):
                 print(f"[补拷] 无图跳过 {product.get('site')} {product.get('name') or product.get('product_id')}")
                 continue
