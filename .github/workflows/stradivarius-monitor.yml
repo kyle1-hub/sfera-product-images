@@ -1,10 +1,7 @@
 name: Stradivarius Daily Diff Monitor
 
 on:
-  schedule:
-    # GitHub Actions uses UTC. 01:47 UTC = 09:47 China time.
-    # Staggered after Sfera, Bijou, Bershka, and Lovisa to reduce state commit conflicts.
-    - cron: '47 1 * * *'
+  # Daily schedule moved to the local hidden Windows task.
   workflow_dispatch:
 
 permissions:

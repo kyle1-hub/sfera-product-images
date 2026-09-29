@@ -131,13 +131,13 @@ Bijou 除通用商品字段外，Store 还维护：
 - `prepare_bijou_image_zips()` 为待补图商品生成附件包并控制大小。
 - `send_wecom_file()` 上传 zip。
 - 成功后更新各商品 `image_sent_at`；失败记录错误并在以后重试。
-- 图片包发送成功后会尝试 `archive_sent_zips()`。本机能写共享盘时落到 `Bijou Brigitte/<品类>/`；GitHub 写失败时改写入仓库 `share-inbox/Bijou Brigitte/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不阻塞补图状态。
+- 图片包发送成功后会尝试 `archive_sent_zips()`。本机能写共享盘时落到 `Bijou Brigitte/<YYYYMMDD>/<品类>/`；GitHub 写失败时改写入仓库 `share-inbox/Bijou Brigitte/<YYYYMMDD>/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不阻塞补图状态。品类用商品真实分类（`Neuer Schmuck` / `Neue Accessoires`），不要再用「待补图片」。
 
 不要改用 `send_wecom_zip_bundle()` 一次性处理全部 Bijou 交付，因为那会失去文字与图片的独立状态。
 
 ## 9. Workflow 与测试
 
-- Workflow：`.github/workflows/bijou-monitor.yml`，含手动与定时入口，并处理状态提交。
+- Workflow：`.github/workflows/bijou-monitor.yml`，仅手动 `workflow_dispatch`。现网每日跑本机隐藏任务。
 - 专项测试：`tests/test_bijou_delivery.py`。
 - 现有测试保护：
   - 变体编号可匹配基础图片 ID。

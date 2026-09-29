@@ -73,7 +73,7 @@ class BijouDeliveryTests(unittest.TestCase):
                 "product_id": "bijou:142749660.1",
             }
             args = argparse.Namespace(baseline_only=False)
-            config = {"wecom_webhook": "test", "state_dir": temp_dir}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "share_library_root": str(Path(temp_dir) / "library")}
 
             with patch.object(MONITOR, "send_wecom", return_value={"errcode": 0}), \
                  patch.object(MONITOR, "bijou_detail_image_candidates", return_value=[]), \
@@ -246,7 +246,7 @@ class BijouDeliveryTests(unittest.TestCase):
                 "product_id": "bijou:142749660.1",
             }
             args = argparse.Namespace(baseline_only=False)
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True, "share_library_root": str(Path(temp_dir) / "library")}
             image_path = Path(temp_dir) / "ready.jpg"
             image_path.write_bytes(b"image")
             downloaded = []

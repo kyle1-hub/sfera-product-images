@@ -118,10 +118,9 @@ Primark 使用通用 `process_site()` 和 `send_wecom_zip_bundle()`：
 
 ## 9. Workflow 与依赖
 
-- Workflow：`.github/workflows/primark-monitor.yml`。
-- 除 Python 依赖外，它还安装 Playwright Chromium。
-- workflow 的浏览器环境可能与本地 `browser_channel` 不同，不能假设本地行为等于 Actions。
-- 它包含手动/定时或路径触发并处理状态提交。
+- Workflow：`.github/workflows/primark-monitor.yml`，仅手动 `workflow_dispatch`。现网每日跑本机隐藏任务。
+- 除 Python 依赖外，GitHub 手动跑还会安装 Playwright Chromium。
+- 本机 Primark 默认无头，且 `allow_headed_fallback=false`、`fallback_to_browser=false`，过不了验证就失败，不弹 Chrome。
 - 未经授权不得运行、dispatch 或以 push 触发。
 
 ## 10. 测试现状

@@ -38,8 +38,8 @@
 - `sites.sfera.categories`：每项包含展示名称 `name` 和 API slug `slug`。
 - 继承的全局项：`state_dir`、`download_images`、`send_empty_report`、超时等。
 - `share_library_root`：客户网站图片库根目录；路径含中文和双空格，必须原样保留 `06  客户网站图片`。
-- `share_site_folders`：站点到库内一级文件夹的映射。Sfera 用库内已有的 `E03-SFERA`；其余站默认用网站名建一级文件夹。一级是网站文件夹，二级是品类文件夹（如 `PENDIENTES`），分类 zip 直接丢进对应品类，不再每天新建日期目录。
-- `share_inbox_dir`：GitHub 云端写不了内网盘时，把已发送压缩包暂存在仓库 `share-inbox/<网站文件夹>/<品类>/`。
+- `share_site_folders`：站点到库内一级文件夹的映射。Sfera 用库内已有的 `E03-Sfera`；其余站默认用网站名建一级文件夹。目录固定三级：`<网站文件夹>/<YYYYMMDD>/<品类>/`（如 `E03-Sfera/20260929/PENDIENTES`）。分类 zip 放进当天对应品类。
+- `share_inbox_dir`：GitHub 云端写不了内网盘时，把已发送压缩包暂存在仓库 `share-inbox/<网站文件夹>/<YYYYMMDD>/<品类>/`。
 - `WECOM_WEBHOOK` 只作为环境变量名存在；任何文档或日志都不得记录其值。
 - 共享盘写入用 Python `shutil.copy2` 写 UNC。本机能连盘时直接拷；GitHub 发企业微信成功后改写入 `share-inbox` 并随状态一起提交。本机 `python sfera_monitor.py --sync-share` 再把暂存包拷进图片库，成功后删除暂存文件。不要写到 ERP 附件上传目录。
 
@@ -114,15 +114,15 @@ Sfera 有两层判定：
 5. 若总包超过企业微信限制，`split_zip_bundle_by_size()` 按实际压缩体积拆包。
 6. `build_zip_bundle_message()` 生成 Markdown 汇总。
 7. `send_wecom()` 发送文字，`send_wecom_file()` 上传附件。
-8. 企业微信成功后，`archive_sent_zips()` 先尝试 `copy_zips_to_share()` 写 `E03-SFERA/<品类>/`。本机连得上共享盘就直接落盘；GitHub 写失败时改写入仓库 `share-inbox/E03-SFERA/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不影响企业微信已发送状态。
+8. 企业微信成功后，`archive_sent_zips()` 先尝试 `copy_zips_to_share()` 写 `E03-Sfera/<YYYYMMDD>/<品类>/`。本机连得上共享盘就直接落盘；GitHub 写失败时改写入仓库 `share-inbox/E03-Sfera/<YYYYMMDD>/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不影响企业微信已发送状态。
 9. 全部成功后清理临时打包目录；失败则保留用于排查。
 
 附件名现在由站点名、分类、数量和 marker 组合。修改打包或企业微信函数会影响所有通用交付站点。
 
 ## 9. Workflow 与测试
 
-- Workflow：`.github/workflows/sfera-monitor.yml`。
-- 它包含手动入口和定时/路径触发逻辑，并会在运行后处理状态文件提交。
+- Workflow：`.github/workflows/sfera-monitor.yml`，仅手动 `workflow_dispatch`。现网每日跑本机隐藏任务 `JewelrySiteMonitorDaily9AM`。
+- 不要为了验证文档或解析改动而触发 workflow。
 - 不要为了验证文档或解析改动而触发 workflow。
 - 当前仓库没有 Sfera 专项测试文件。涉及 Sfera 修改时，优先新增脱网 fixture/mocked 单元测试，不能把真实抓取当单元测试。
 

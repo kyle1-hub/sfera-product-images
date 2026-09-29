@@ -111,7 +111,7 @@
 
 ## 9. Workflow 与测试
 
-- Workflow：`.github/workflows/stradivarius-monitor.yml`，包含手动/定时或路径触发，并处理状态提交。
+- Workflow：`.github/workflows/stradivarius-monitor.yml`，仅手动 `workflow_dispatch`。现网每日跑本机隐藏任务。
 - 未经授权不要运行 workflow，也不要借测试触发真实网站。
 - 当前没有 Stradivarius 专项测试。建议补齐：5 分类 URL/API 构造、部分分类失败、全分类失败、productsArray、价格、图片、namespace 和跨分类去重的 fixture/mocked 测试。
 

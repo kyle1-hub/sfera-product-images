@@ -1,10 +1,7 @@
 name: Lovisa New Monitor
 
 on:
-  schedule:
-    # GitHub Actions uses UTC. 01:37 UTC = 09:37 China time.
-    # Staggered after Sfera, Bijou, and Bershka to reduce state commit conflicts.
-    - cron: '37 1 * * *'
+  # Daily schedule moved to the local hidden Windows task.
   workflow_dispatch:
 
 permissions:

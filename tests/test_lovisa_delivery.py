@@ -173,7 +173,7 @@ class LovisaDeliveryTests(unittest.TestCase):
             args = argparse.Namespace(baseline_only=False)
             product = mapped_product(image_url="https://cdn.example/model.jpg")
             product["image_candidates"] = ["https://cdn.example/model.jpg"]
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True, "share_library_root": str(Path(temp_dir) / "library")}
             image_path = Path(temp_dir) / "ready.jpg"
             image_path.write_bytes(b"image")
             package_path = Path(temp_dir) / "package.zip"
@@ -245,7 +245,7 @@ class LovisaDeliveryTests(unittest.TestCase):
             store = MONITOR.Store(temp_dir)
             args = argparse.Namespace(baseline_only=True)
             product = mapped_product()
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True, "share_library_root": str(Path(temp_dir) / "library")}
             with patch.object(MONITOR, "send_wecom") as send_text, patch.object(MONITOR, "send_wecom_file") as send_file:
                 MONITOR.process_lovisa(config, store, args, [product], BASE_URL, "Lovisa", "New")
             send_text.assert_not_called()
@@ -260,7 +260,7 @@ class LovisaDeliveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MONITOR.Store(temp_dir)
             args = argparse.Namespace(baseline_only=False)
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True, "share_library_root": str(Path(temp_dir) / "library")}
             no_image = mapped_product()
             with patch.object(MONITOR, "send_wecom", return_value={"errcode": 0}) as send_text, patch.object(
                 MONITOR, "lovisa_detail_image_candidates", return_value=[]
@@ -297,7 +297,7 @@ class LovisaDeliveryTests(unittest.TestCase):
             store = MONITOR.Store(temp_dir)
             args = argparse.Namespace(baseline_only=False)
             product = mapped_product()
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": False}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": False, "share_library_root": str(Path(temp_dir) / "library")}
             with patch.object(MONITOR, "send_wecom", return_value={"errcode": 40001}):
                 with self.assertRaises(RuntimeError):
                     MONITOR.process_lovisa(config, store, args, [product], BASE_URL, "Lovisa", "New")
@@ -312,7 +312,7 @@ class LovisaDeliveryTests(unittest.TestCase):
             store = MONITOR.Store(temp_dir)
             args = argparse.Namespace(baseline_only=False)
             product = mapped_product(image_url="https://cdn.example/1.jpg")
-            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True}
+            config = {"wecom_webhook": "test", "state_dir": temp_dir, "download_images": True, "share_library_root": str(Path(temp_dir) / "library")}
             image_path = Path(temp_dir) / "ready.jpg"
             image_path.write_bytes(b"image")
             package_path = Path(temp_dir) / "package.zip"

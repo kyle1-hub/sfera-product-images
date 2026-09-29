@@ -107,7 +107,22 @@ python sfera_monitor.py --site stradivarius --force-new
 python sfera_monitor.py --site primark --force-new
 ```
 
-## GitHub Actions 定时运行
+## 本机每日运行（现网）
+
+GitHub 定时已停。电脑开着才抓、才发企业微信、才写共享盘；关机当天不跑，避免企业微信有图而共享盘没有。
+
+本机隐藏任务 `JewelrySiteMonitorDaily9AM` 每天 09:07 跑 `scripts/run_daily_monitors.ps1`：Sfera、Bijou、Lovisa、Stradivarius、Primark。Bershka 仍暂停。窗口隐藏，日志在 `logs/daily_YYYYMMDD.log`。Primark 只走无头，过不了验证就失败记日志，不弹 Chrome。
+
+安装或覆盖任务：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_local_daily_task.ps1
+```
+
+本机需要 `config.json`（可从 `config.example.json` 复制）和企业微信 webhook：优先环境变量 `WECOM_WEBHOOK`，不要把真实地址提交进仓库。旧任务 `SferaNuevoMonitorDaily9AM`（指向 `E:\AI\sfera_monitor`）和 `Sfera-ShareInbox-Sync` 已停。
+
+## GitHub Actions 手动运行
+
 
 工作流文件：
 
@@ -118,26 +133,8 @@ python sfera_monitor.py --site primark --force-new
 - `.github/workflows/stradivarius-monitor.yml`
 - `.github/workflows/primark-monitor.yml`
 
-默认定时：
+六个 workflow 都只保留手动 `workflow_dispatch`，不再按 cron 跑。公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。漏拷某天可用：
 
-```text
-Sfera：每天 01:07 UTC，也就是北京时间 09:07
-Bijou Brigitte：每天 01:17 UTC，也就是北京时间 09:17
-Bershka：当前暂停定时，仅保留手动 workflow_dispatch；恢复后建议仍用 01:27 UTC，也就是北京时间 09:27
-Lovisa：每天 01:37 UTC，也就是北京时间 09:37
-Stradivarius：每天 01:47 UTC，也就是北京时间 09:47
-Primark：每天 01:57 UTC，也就是北京时间 09:57
-```
-
-公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。
-
-GitHub 发企业微信成功后，压缩包会提交到仓库 `share-inbox/<网站文件夹>/<品类>/`。Ubuntu runner 写不了内网 UNC，不会再把 `\\192...` 当成本地拷贝成功。这台能连内网盘的电脑再跑：
-
-```powershell
-python sfera_monitor.py --sync-share
-```
-
-或用 `scripts/sync_share_inbox.ps1`。本机任务 `Sfera-ShareInbox-Sync` 每天 10:17 只拷盘，不抓网站、不发企业微信；拷成功后会把已清空的 `share-inbox` 推回仓库。电脑关机不会补拷。漏拷某天可用：
 
 ```powershell
 python sfera_monitor.py --archive-sent-day 2026-09-29

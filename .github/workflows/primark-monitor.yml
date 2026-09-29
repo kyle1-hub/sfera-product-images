@@ -1,10 +1,7 @@
 name: Primark Daily Diff Monitor
 
 on:
-  schedule:
-    # GitHub Actions uses UTC. 01:57 UTC = 09:57 China time.
-    # Staggered after Sfera, Bijou, Bershka, Lovisa, and Stradivarius to reduce state commit conflicts.
-    - cron: '57 1 * * *'
+  # Daily schedule moved to the local hidden Windows task.
   workflow_dispatch:
 
 permissions:

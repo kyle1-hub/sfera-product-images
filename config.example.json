@@ -1,5 +1,5 @@
 {
-  "enabled_sites": ["sfera", "bijou", "bershka", "lovisa", "stradivarius", "primark"],
+  "enabled_sites": ["sfera", "bijou", "lovisa", "stradivarius", "primark"],
   "sites": {
     "sfera": {
       "display_name": "Sfera",
@@ -88,8 +88,9 @@
       "marker": "Newly appeared",
       "base_url": "https://www.primark.com/en-us/c/women/accessories/jewelry",
       "prefer_backend": true,
-      "fallback_to_browser": true,
+      "fallback_to_browser": false,
       "backend_headless": true,
+      "allow_headed_fallback": false,
       "browser_headless": true,
       "browser_channel": "chrome",
       "headless": false,
@@ -115,7 +116,7 @@
   "share_library_root": "\\\\192.168.10.254\\alpha_share\\9QOT\\03 QOT PHOTO LIBRARY-图片库\\06  客户网站图片",
   "share_inbox_dir": "share-inbox",
   "share_site_folders": {
-    "sfera": "E03-SFERA",
+    "sfera": "E03-Sfera",
     "bijou": "Bijou Brigitte",
     "bershka": "Bershka",
     "lovisa": "Lovisa",

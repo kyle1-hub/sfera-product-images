@@ -68,7 +68,7 @@ SITE_META = {
 DEFAULT_SHARE_LIBRARY_ROOT = r"\\192.168.10.254\alpha_share\9QOT\03 QOT PHOTO LIBRARY-图片库\06  客户网站图片"
 DEFAULT_SHARE_INBOX_DIR = "share-inbox"
 DEFAULT_SHARE_SITE_FOLDERS = {
-    "sfera": "E03-SFERA",
+    "sfera": "E03-Sfera",
     "bijou": "Bijou Brigitte",
     "bershka": "Bershka",
     "lovisa": "Lovisa",
@@ -2005,7 +2005,7 @@ def primark_html_is_challenge(html_text):
 def primark_backend_session(config, base_url):
     preferred_headless = bool(config.get("backend_headless", True))
     modes = [preferred_headless]
-    if False not in modes:
+    if config.get("allow_headed_fallback", False) and False not in modes:
         modes.append(False)
     last_error = None
     for headless in modes:
@@ -2642,9 +2642,27 @@ def can_write_share_library(root):
     return True
 
 
+def share_day_folder(day=None):
+    if isinstance(day, datetime):
+        return day.strftime("%Y%m%d")
+    if isinstance(day, str) and day.strip():
+        text = day.strip().replace("-", "")[:8]
+        if len(text) == 8 and text.isdigit():
+            return text
+    return datetime.now().strftime("%Y%m%d")
+
+
+def share_library_root(config):
+    if not config:
+        return DEFAULT_SHARE_LIBRARY_ROOT
+    if "share_library_root" in config:
+        return config.get("share_library_root") or ""
+    return DEFAULT_SHARE_LIBRARY_ROOT
+
+
 def share_archive_root(config, site_key):
     folder = share_site_folder_name(site_key, config)
-    root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    root = share_library_root(config)
     if not folder or not root:
         return None
     return Path(root) / folder
@@ -2680,7 +2698,9 @@ def copy_zips_to_share(zip_paths, config, site_key, site_name, product_count=Non
     archive_root = share_archive_root(config, site_key)
     if not archive_root:
         return {"copied": [], "dir": "", "skipped": "no-share-folder"}
-    library_root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    library_root = share_library_root(config)
+    if not library_root:
+        return {"copied": [], "dir": "", "skipped": "no-share-folder"}
     if not can_write_share_library(library_root):
         print(f"[共享盘] {site_name} 当前环境写不了 UNC，改走仓库暂存")
         return {"copied": [], "dir": str(archive_root), "error": "unc-not-reachable"}
@@ -2695,9 +2715,9 @@ def copy_zips_to_share(zip_paths, config, site_key, site_name, product_count=Non
             if categories and index < len(categories) and categories[index]:
                 category = categories[index]
             category_name = safe_filename(category or share_category_from_zip_name(zip_path, site_name), "未分类")
-            category_dir = archive_root / category_name
+            category_dir = archive_root / share_day_folder(day) / category_name
             category_dir.mkdir(parents=True, exist_ok=True)
-            target = category_dir / share_archive_zip_name(zip_path, day)
+            target = category_dir / Path(zip_path).name
             shutil.copy2(str(zip_path), str(target))
             copied.append(str(target))
             copied_dirs.append(str(category_dir))
@@ -2729,9 +2749,9 @@ def stash_zips_for_share(zip_paths, config, site_key, site_name, day=None, categ
             if categories and index < len(categories) and categories[index]:
                 category = categories[index]
             category_name = safe_filename(category or share_category_from_zip_name(zip_path, site_name), "未分类")
-            category_dir = inbox_root / folder / category_name
+            category_dir = inbox_root / folder / share_day_folder(day) / category_name
             category_dir.mkdir(parents=True, exist_ok=True)
-            target = category_dir / share_archive_zip_name(zip_path, day)
+            target = category_dir / Path(zip_path).name
             shutil.copy2(str(zip_path), str(target))
             copied.append(str(target))
         print(f"[共享盘暂存] {site_name} 已写入 {len(copied)} 个压缩包到 {inbox_root / folder}")
@@ -2770,7 +2790,10 @@ def prune_empty_dirs(path, stop_at):
 
 def sync_share_inbox(config):
     inbox = share_inbox_root(config)
-    library_root = (config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT
+    library_root = share_library_root(config)
+    if not library_root:
+        print("[共享盘同步] 未配置共享盘路径，跳过")
+        return {"copied": [], "skipped": "no-share-folder"}
     if not can_write_share_library(library_root):
         print("[共享盘同步] 当前环境写不了 UNC，跳过")
         return {"copied": [], "skipped": "unc-not-reachable"}
@@ -2847,11 +2870,11 @@ def archive_ready_products(config, site_key, products, day=None):
         if site_key == "bijou":
             bundle_root, packages, _prepared = prepare_bijou_image_zips(ready, state_dir)
             zip_paths = [zip_path for zip_path, _products in packages]
-            categories = None
+            categories = [package_products[0].get("category") if package_products else "未分类" for _zip, package_products in packages]
         elif site_key == "lovisa":
             bundle_root, packages, _prepared = prepare_lovisa_image_zips(ready, state_dir)
             zip_paths = [zip_path for zip_path, _products in packages]
-            categories = None
+            categories = [package_products[0].get("category") if package_products else "未分类" for _zip, package_products in packages]
         else:
             _master, category_zips, category_counts, bundle_root = build_product_zip_bundle(
                 ready, state_dir, meta.get("base_url") or "", site_name, marker
@@ -3021,53 +3044,51 @@ def split_lovisa_text_messages(products, site_url, max_bytes=LOVISA_WECOM_MARKDO
     return ["\n".join(lovisa_text_message_lines(part, site_url, index, total)) for index, part in enumerate(parts, 1)]
 
 
-def prepare_bijou_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
-    bundle_root, image_dir, prepared = prepare_zip_images(products, state_dir, "Bijou Brigitte")
-    packages = []
-    current = []
-    current_size = 0
-    safe_limit = max_bytes - 512 * 1024
-    for item in prepared:
-        if current and current_size + item["size"] > safe_limit:
-            packages.append(current)
-            current = []
-            current_size = 0
-        current.append(item)
-        current_size += item["size"]
-    if current:
-        packages.append(current)
-    outputs = []
-    for index, package in enumerate(packages, 1):
-        zip_path = bundle_root / f"Bijou_Brigitte_待补图片_{len(package)}款_第{index}包.zip"
-        write_zip_from_paths(zip_path, [item["image_path"] for item in package])
-        outputs.append((zip_path, [item["product"] for item in package]))
-    return bundle_root, outputs, prepared
-
-
-def prepare_lovisa_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
-    bundle_root, image_dir, prepared = prepare_zip_images(products, state_dir, "Lovisa")
+def split_prepared_packages(prepared_items, bundle_root, max_bytes):
     packages = []
     current = []
     safe_limit = max_bytes - 512 * 1024
-    for item in prepared:
+    trial_path = Path(bundle_root) / "_size_trial.zip"
+    for item in prepared_items:
         candidate = current + [item]
-        trial_path = bundle_root / "Lovisa_trial.zip"
         write_zip_from_paths(trial_path, [row["image_path"] for row in candidate])
         trial_size = trial_path.stat().st_size
-        trial_path.unlink()
         if current and trial_size > safe_limit:
             packages.append(current)
             current = [item]
         else:
             current = candidate
+    if trial_path.exists():
+        trial_path.unlink()
     if current:
         packages.append(current)
+    return packages
+
+
+def prepare_category_image_zips(products, state_dir, site_name, marker="NEW", max_bytes=19 * 1024 * 1024):
+    bundle_root, _image_dir, prepared = prepare_zip_images(products, state_dir, site_name)
+    grouped = {}
+    for item in prepared:
+        grouped.setdefault(item["product"].get("category") or "未分类", []).append(item)
     outputs = []
-    for index, package in enumerate(packages, 1):
-        zip_path = bundle_root / f"Lovisa_待补图片_{len(package)}款_第{index}包.zip"
-        write_zip_from_paths(zip_path, [item["image_path"] for item in package])
-        outputs.append((zip_path, [item["product"] for item in package]))
+    site_slug = safe_filename(site_name, "site").replace(" ", "_")
+    for category, items in grouped.items():
+        packages = split_prepared_packages(items, bundle_root, max_bytes)
+        category_name = safe_filename(category, "未分类")
+        for index, package in enumerate(packages, 1):
+            suffix = f"_第{index}包" if len(packages) > 1 else ""
+            zip_path = bundle_root / f"{site_slug}_{category_name}_{len(package)}款_{marker}{suffix}.zip"
+            write_zip_from_paths(zip_path, [item["image_path"] for item in package])
+            outputs.append((zip_path, [item["product"] for item in package]))
     return bundle_root, outputs, prepared
+
+
+def prepare_bijou_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
+    return prepare_category_image_zips(products, state_dir, "Bijou Brigitte", "Neu", max_bytes)
+
+
+def prepare_lovisa_image_zips(products, state_dir, max_bytes=19 * 1024 * 1024):
+    return prepare_category_image_zips(products, state_dir, "Lovisa", "New", max_bytes)
 
 
 def send_wecom_news(webhook, products, title_prefix="Sfera NUEVO"):
@@ -3474,6 +3495,10 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
                     "bijou",
                     site_name,
                     len(delivered_ids),
+                    categories=[
+                        (package_products[0].get("category") if package_products else "未分类")
+                        for _zip, package_products in packages
+                    ],
                 )
         finally:
             if set(delivered_ids) == prepared_ids:
@@ -3571,6 +3596,10 @@ def process_lovisa(config, store, args, products, site_url, site_name, marker):
                     "lovisa",
                     site_name,
                     len(delivered_ids),
+                    categories=[
+                        (package_products[0].get("category") if package_products else "未分类")
+                        for _zip, package_products in packages
+                    ],
                 )
         finally:
             if set(delivered_ids) == prepared_ids:

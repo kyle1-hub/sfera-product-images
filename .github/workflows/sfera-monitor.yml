@@ -1,9 +1,8 @@
 name: Sfera NUEVO Monitor
 
 on:
-  schedule:
-    # GitHub Actions uses UTC. 01:07 UTC = 09:07 China time.
-    - cron: '7 1 * * *'
+  # Local hidden Windows task now owns daily runs so WeCom is not sent
+  # when this PC is off and the photo library is unreachable.
   workflow_dispatch:
 
 permissions:

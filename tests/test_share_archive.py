@@ -27,28 +27,28 @@ class ShareArchiveTests(unittest.TestCase):
             "COLLARES Y CHOKERS",
         )
         self.assertEqual(
-            MONITOR.share_category_from_zip_name("Lovisa_待补图片_4款_第1包.zip", "Lovisa"),
-            "待补图片",
+            MONITOR.share_category_from_zip_name("Lovisa_fashion_4款_New_第1包.zip", "Lovisa"),
+            "fashion",
         )
 
-    def test_copy_zips_into_site_category_folder(self):
+    def test_copy_zips_into_site_day_category_folder(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             library = Path(temp_dir) / "library"
             source = Path(temp_dir) / "Sfera_ANILLOS_1款_NUEVO.zip"
             source.write_bytes(b"zip")
             config = {
                 "share_library_root": str(library),
-                "share_site_folders": {"sfera": "E03-SFERA"},
+                "share_site_folders": {"sfera": "E03-Sfera"},
             }
             result = MONITOR.copy_zips_to_share([source], config, "sfera", "Sfera", 1, day=datetime(2026, 9, 29))
-            target = library / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+            target = library / "E03-Sfera" / "20260929" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO.zip"
             self.assertTrue(target.exists())
             self.assertEqual(result["copied"], [str(target)])
             again = Path(temp_dir) / "Sfera_ANILLOS_2款_NUEVO.zip"
             again.write_bytes(b"zip2")
             MONITOR.copy_zips_to_share([again], config, "sfera", "Sfera", 2, day=datetime(2026, 9, 30))
-            self.assertTrue((library / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_2款_NUEVO_20260930.zip").exists())
-            self.assertEqual(len(list((library / "E03-SFERA").iterdir())), 1)
+            self.assertTrue((library / "E03-Sfera" / "20260930" / "ANILLOS" / "Sfera_ANILLOS_2款_NUEVO.zip").exists())
+            self.assertEqual(sorted(path.name for path in (library / "E03-Sfera").iterdir()), ["20260929", "20260930"])
 
     def test_copy_skips_unmapped_site(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -56,7 +56,7 @@ class ShareArchiveTests(unittest.TestCase):
             source.write_bytes(b"zip")
             result = MONITOR.copy_zips_to_share(
                 [source],
-                {"share_library_root": temp_dir, "share_site_folders": {"sfera": "E03-SFERA"}},
+                {"share_library_root": temp_dir, "share_site_folders": {"sfera": "E03-Sfera"}},
                 "unknown-site",
                 "Unknown",
                 1,
@@ -73,7 +73,7 @@ class ShareArchiveTests(unittest.TestCase):
                 inbox = Path(temp_dir) / "inbox"
                 config = {
                     "share_library_root": unc,
-                    "share_site_folders": {"sfera": "E03-SFERA"},
+                    "share_site_folders": {"sfera": "E03-Sfera"},
                     "share_inbox_dir": str(inbox),
                 }
                 result = MONITOR.archive_sent_zips(
@@ -84,7 +84,7 @@ class ShareArchiveTests(unittest.TestCase):
                     1,
                     day=datetime(2026, 9, 29),
                 )
-                stashed = inbox / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+                stashed = inbox / "E03-Sfera" / "20260929" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO.zip"
                 self.assertTrue(stashed.exists())
                 self.assertEqual(result["copied"], [])
                 self.assertEqual(result["error"], "unc-not-reachable")
@@ -99,7 +99,7 @@ class ShareArchiveTests(unittest.TestCase):
                     [source],
                     {
                         "share_library_root": temp_dir,
-                        "share_site_folders": {"sfera": "E03-SFERA"},
+                        "share_site_folders": {"sfera": "E03-Sfera"},
                     },
                     "sfera",
                     "Sfera",
@@ -125,7 +125,7 @@ class ShareArchiveTests(unittest.TestCase):
             library = Path(temp_dir) / "library"
             config = {
                 "share_library_root": str(library),
-                "share_site_folders": {"sfera": "E03-SFERA"},
+                "share_site_folders": {"sfera": "E03-Sfera"},
             }
             with patch.object(MONITOR, "send_wecom", return_value={"errcode": 0}), patch.object(
                 MONITOR, "send_wecom_file", return_value={"errcode": 0}
@@ -141,9 +141,10 @@ class ShareArchiveTests(unittest.TestCase):
                     site_key="sfera",
                 )
             copied = Path(result["share"]["copied"][0])
-            self.assertEqual(copied.parent.parent.name, "E03-SFERA")
+            self.assertEqual(copied.parent.parent.parent.name, "E03-Sfera")
+            self.assertRegex(copied.parent.parent.name, r"^\d{8}$")
             self.assertEqual(copied.parent.name, "ANILLOS")
-            self.assertTrue(copied.name.startswith("Sfera_ANILLOS_1款_NUEVO_"))
+            self.assertTrue(copied.name.startswith("Sfera_ANILLOS_1款_NUEVO"))
             self.assertTrue(copied.name.endswith(".zip"))
             self.assertTrue(copied.exists())
             self.assertEqual(result["cleanup"], "deleted")
@@ -155,7 +156,7 @@ class ShareArchiveTests(unittest.TestCase):
             inbox = Path(temp_dir) / "inbox"
             config = {
                 "share_library_root": str(Path(temp_dir) / "library"),
-                "share_site_folders": {"sfera": "E03-SFERA"},
+                "share_site_folders": {"sfera": "E03-Sfera"},
                 "share_inbox_dir": str(inbox),
             }
             original_copy = MONITOR.shutil.copy2
@@ -175,7 +176,7 @@ class ShareArchiveTests(unittest.TestCase):
                     1,
                     day=datetime(2026, 9, 29),
                 )
-            stashed = inbox / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+            stashed = inbox / "E03-Sfera" / "20260929" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO.zip"
             self.assertTrue(stashed.exists())
             self.assertEqual(result["copied"], [])
             self.assertEqual(result["inbox"], [str(stashed)])
@@ -184,7 +185,7 @@ class ShareArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             inbox = Path(temp_dir) / "inbox"
             library = Path(temp_dir) / "library"
-            zipped = inbox / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+            zipped = inbox / "E03-Sfera" / "20260929" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO.zip"
             zipped.parent.mkdir(parents=True, exist_ok=True)
             zipped.write_bytes(b"zip")
             result = MONITOR.sync_share_inbox(
@@ -193,11 +194,11 @@ class ShareArchiveTests(unittest.TestCase):
                     "share_inbox_dir": str(inbox),
                 }
             )
-            dest = library / "E03-SFERA" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO_20260929.zip"
+            dest = library / "E03-Sfera" / "20260929" / "ANILLOS" / "Sfera_ANILLOS_1款_NUEVO.zip"
             self.assertTrue(dest.exists())
             self.assertFalse(zipped.exists())
             self.assertEqual(result["copied"], [str(dest)])
-            self.assertFalse((inbox / "E03-SFERA").exists())
+            self.assertFalse((inbox / "E03-Sfera").exists())
 
     def test_send_bundle_stashes_when_share_offline(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -215,7 +216,7 @@ class ShareArchiveTests(unittest.TestCase):
             inbox = Path(temp_dir) / "inbox"
             config = {
                 "share_library_root": r"\\offline-share\library",
-                "share_site_folders": {"sfera": "E03-SFERA"},
+                "share_site_folders": {"sfera": "E03-Sfera"},
                 "share_inbox_dir": str(inbox),
             }
             with patch.object(MONITOR, "send_wecom", return_value={"errcode": 0}), patch.object(
@@ -232,8 +233,47 @@ class ShareArchiveTests(unittest.TestCase):
                     site_key="sfera",
                 )
             self.assertTrue(result["share"]["inbox"])
-            self.assertTrue(Path(result["share"]["inbox"][0]).exists())
-            self.assertTrue(Path(result["share"]["inbox"][0]).name.startswith("Sfera_ANILLOS_1款_NUEVO_"))
+            inbox_path = Path(result["share"]["inbox"][0])
+            self.assertTrue(inbox_path.exists())
+            self.assertEqual(inbox_path.parent.name, "ANILLOS")
+            self.assertRegex(inbox_path.parent.parent.name, r"^\d{8}$")
+            self.assertTrue(inbox_path.name.startswith("Sfera_ANILLOS_1款_NUEVO"))
+
+    def test_prepare_category_image_zips_groups_by_category(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            from PIL import Image
+
+            image_dir = Path(temp_dir) / "imgs"
+            image_dir.mkdir()
+            products = []
+            for index, (name, category) in enumerate(
+                [("Ring A", "Neuer Schmuck"), ("Bag B", "Neue Accessoires"), ("Ring C", "Neuer Schmuck")],
+                1,
+            ):
+                path = image_dir / f"{index}.jpg"
+                Image.new("RGB", (8, 8), "white").save(path)
+                products.append(
+                    {
+                        "site": "bijou",
+                        "product_id": f"bijou:{index}",
+                        "source_id": str(index),
+                        "name": name,
+                        "category": category,
+                        "image_path": str(path),
+                    }
+                )
+            bundle_root, outputs, prepared = MONITOR.prepare_bijou_image_zips(products, temp_dir)
+            names = sorted(path.name for path, _products in outputs)
+            self.assertEqual(len(prepared), 3)
+            self.assertEqual(
+                names,
+                [
+                    "Bijou_Brigitte_Neue Accessoires_1款_Neu.zip",
+                    "Bijou_Brigitte_Neuer Schmuck_2款_Neu.zip",
+                ],
+            )
+            shutil_rm = __import__("shutil")
+            shutil_rm.rmtree(bundle_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

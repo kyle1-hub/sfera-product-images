@@ -112,14 +112,14 @@ Lovisa 从 `process_site()` 进入专属 `process_lovisa()` 两阶段交付：
 5. 没有候选图、下载或转换失败只记录尝试与错误，其他商品继续处理；后续定时只补图片。
 6. 图片按实际压缩体积拆包，每个包保留精确商品列表；每包企业微信成功后才写对应 `image_sent_at`。
 7. 附件返回非零错误码时抛错，已成功包保持成功，失败包留待下次重试。
-8. 发送成功后尝试 `archive_sent_zips()`。本机能写共享盘时落到 `Lovisa/<品类>/`；GitHub 写失败时改写入仓库 `share-inbox/Lovisa/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不影响图片已发送状态。
+8. 发送成功后尝试 `archive_sent_zips()`。本机能写共享盘时落到 `Lovisa/<YYYYMMDD>/<品类>/`；GitHub 写失败时改写入仓库 `share-inbox/Lovisa/<YYYYMMDD>/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不影响图片已发送状态。品类用商品真实分类（不锈钢 / 真金 / CZ / fashion），不要再用「待补图片」。
 9. 全部准备好的附件成功后清理临时目录；失败时保留。
 
 Lovisa 不再依赖通用一次性 `send_wecom_zip_bundle()` 判断交付成功。workflow 即使监控步骤失败也保存 SQLite 的 pending/部分成功进度，但不吞掉失败退出码。
 
 ## 10. Workflow 与测试
 
-- Workflow：`.github/workflows/lovisa-monitor.yml`，包含手动、定时或路径相关触发，并处理状态提交。
+- Workflow：`.github/workflows/lovisa-monitor.yml`，仅手动 `workflow_dispatch`。现网每日跑本机隐藏任务。
 - 不要从代码修改任务推导出运行 workflow 的授权。
 - 专项测试：`tests/test_lovisa_delivery.py`。覆盖显式分页、短页继续、空页/异常结构/重复页/页数上限失败、跨页去重、无图保留、分类/最低价/候选图/父 product ID、旧状态迁移、baseline、文字与附件失败及补发。所有网站、图片和企业微信调用均 mock。
 
