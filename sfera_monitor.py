@@ -66,8 +66,14 @@ SITE_META = {
     },
 }
 DEFAULT_SHARE_LIBRARY_ROOT = r"\\192.168.10.254\alpha_share\9QOT\03 QOT PHOTO LIBRARY-图片库\06  客户网站图片"
+DEFAULT_SHARE_INBOX_DIR = "share-inbox"
 DEFAULT_SHARE_SITE_FOLDERS = {
     "sfera": "E03-SFERA",
+    "bijou": "Bijou Brigitte",
+    "bershka": "Bershka",
+    "lovisa": "Lovisa",
+    "stradivarius": "Stradivarius",
+    "primark": "Primark",
 }
 
 
@@ -83,6 +89,9 @@ def load_config():
     folders = dict(DEFAULT_SHARE_SITE_FOLDERS)
     folders.update(cfg.get("share_site_folders") or {})
     cfg["share_site_folders"] = folders
+    inbox = cfg.get("share_inbox_dir") or DEFAULT_SHARE_INBOX_DIR
+    inbox_path = Path(inbox)
+    cfg["share_inbox_dir"] = str(inbox_path if inbox_path.is_absolute() else (Path(__file__).parent / inbox_path).resolve())
     return cfg
 
 
@@ -2658,6 +2667,90 @@ def copy_zips_to_share(zip_paths, config, site_key, site_name, product_count=Non
         return {"copied": [], "dir": str(archive_root), "error": str(exc)}
 
 
+def share_inbox_root(config=None):
+    inbox = (config or {}).get("share_inbox_dir") or DEFAULT_SHARE_INBOX_DIR
+    path = Path(inbox)
+    if path.is_absolute():
+        return path
+    return (Path(__file__).parent / path).resolve()
+
+
+def stash_zips_for_share(zip_paths, config, site_key, site_name, day=None, categories=None):
+    inbox_root = share_inbox_root(config)
+    folder = share_site_folder_name(site_key, config) or safe_filename(site_name or site_key, "site")
+    zip_paths = [Path(path) for path in zip_paths if path and Path(path).exists()]
+    if not zip_paths:
+        return {"copied": [], "dir": str(inbox_root), "skipped": "no-zips"}
+    try:
+        copied = []
+        for index, zip_path in enumerate(zip_paths):
+            category = None
+            if categories and index < len(categories) and categories[index]:
+                category = categories[index]
+            category_name = safe_filename(category or share_category_from_zip_name(zip_path, site_name), "未分类")
+            category_dir = inbox_root / folder / category_name
+            category_dir.mkdir(parents=True, exist_ok=True)
+            target = category_dir / share_archive_zip_name(zip_path, day)
+            shutil.copy2(str(zip_path), str(target))
+            copied.append(str(target))
+        print(f"[共享盘暂存] {site_name} 已写入 {len(copied)} 个压缩包到 {inbox_root / folder}")
+        return {"copied": copied, "dir": str(inbox_root / folder)}
+    except Exception as exc:
+        print(f"[共享盘暂存] {site_name} 写入失败，不影响企业微信已发送状态：{exc}")
+        return {"copied": [], "dir": str(inbox_root), "error": str(exc)}
+
+
+def archive_sent_zips(zip_paths, config, site_key, site_name, product_count=None, day=None, categories=None):
+    share_result = copy_zips_to_share(zip_paths, config, site_key, site_name, product_count, day, categories)
+    if share_result.get("copied"):
+        share_result["inbox"] = []
+        return share_result
+    inbox_result = stash_zips_for_share(zip_paths, config, site_key, site_name, day, categories)
+    share_result["inbox"] = inbox_result.get("copied") or []
+    share_result["inbox_dir"] = inbox_result.get("dir")
+    if inbox_result.get("error"):
+        share_result["inbox_error"] = inbox_result["error"]
+    return share_result
+
+
+def prune_empty_dirs(path, stop_at):
+    current = Path(path)
+    stop_at = Path(stop_at)
+    while current != stop_at and current.is_dir():
+        try:
+            next(current.iterdir())
+            break
+        except StopIteration:
+            current.rmdir()
+            current = current.parent
+        except OSError:
+            break
+
+
+def sync_share_inbox(config):
+    inbox = share_inbox_root(config)
+    library = Path((config or {}).get("share_library_root") or DEFAULT_SHARE_LIBRARY_ROOT)
+    if not inbox.exists():
+        print("[共享盘同步] 暂存目录为空")
+        return {"copied": [], "skipped": "no-inbox"}
+    copied = []
+    errors = []
+    for zip_path in sorted(inbox.rglob("*.zip")):
+        dest = library / zip_path.relative_to(inbox)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(zip_path), str(dest))
+            parent = zip_path.parent
+            zip_path.unlink()
+            prune_empty_dirs(parent, inbox)
+            copied.append(str(dest))
+        except Exception as exc:
+            errors.append({"path": str(zip_path), "error": str(exc)})
+            print(f"[共享盘同步] 拷贝失败 {zip_path.name}：{exc}")
+    print(f"[共享盘同步] 已拷贝 {len(copied)} 个压缩包到 {library}")
+    return {"copied": copied, "errors": errors, "dir": str(library)}
+
+
 def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfera", marker="NUEVO", config=None, site_key=""):
     max_bytes = 19 * 1024 * 1024
     master_zip, category_zips, category_counts, bundle_root = build_product_zip_bundle(products, state_dir, site_url, site_name, marker)
@@ -2680,7 +2773,7 @@ def send_wecom_zip_bundle(webhook, products, state_dir, site_url, site_name="Sfe
     if ok:
         share_files = category_zips if zip_targets == [master_zip] else zip_targets
         share_categories = [category for category, _ in category_counts] if zip_targets == [master_zip] else None
-        share_result = copy_zips_to_share(
+        share_result = archive_sent_zips(
             share_files,
             config or {},
             site_key,
@@ -3231,7 +3324,7 @@ def process_bijou(config, store, args, products, site_url, site_name, marker):
                 store.mark_delivery_success(package_ids, "image_sent_at")
                 delivered_ids.extend(package_ids)
             if delivered_ids:
-                copy_zips_to_share(
+                archive_sent_zips(
                     [zip_path for zip_path, _ in packages],
                     config,
                     "bijou",
@@ -3321,7 +3414,7 @@ def process_lovisa(config, store, args, products, site_url, site_name, marker):
                 store.mark_delivery_success(package_ids, "image_sent_at")
                 delivered_ids.extend(package_ids)
             if delivered_ids:
-                copy_zips_to_share(
+                archive_sent_zips(
                     [zip_path for zip_path, _ in packages],
                     config,
                     "lovisa",
@@ -3407,6 +3500,10 @@ def run(args):
         result = send_wecom(config["wecom_webhook"], "产品上新监控：企业微信机器人测试消息发送成功。")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
+    if getattr(args, "sync_share", False):
+        result = sync_share_inbox(config)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 1 if result.get("errors") else 0
 
     store = Store(config["state_dir"], read_only=args.audit_only)
     failures = []
@@ -3422,6 +3519,7 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description="Sfera NUEVO product monitor")
     parser.add_argument("--test-wecom", action="store_true", help="send a WeCom test message only")
+    parser.add_argument("--sync-share", action="store_true", help="copy GitHub share-inbox zips onto the photo library share and do not send WeCom")
     parser.add_argument("--send", action="store_true", help="send report even when no new products are found")
     parser.add_argument("--force-new", action="store_true", help="treat all current monitored products as new for testing")
     parser.add_argument("--baseline-only", action="store_true", help="record current products without downloading images or sending product bundles")

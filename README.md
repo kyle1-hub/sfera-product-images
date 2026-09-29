@@ -131,6 +131,14 @@ Primark：每天 01:57 UTC，也就是北京时间 09:57
 
 公开仓库使用普通 Ubuntu runner 通常不消耗私有仓库 Actions 免费分钟数。
 
+GitHub 发企业微信成功后，压缩包会提交到仓库 `share-inbox/<网站文件夹>/<品类>/`。这台能连内网盘的电脑再跑：
+
+```powershell
+python sfera_monitor.py --sync-share
+```
+
+或用 `scripts/sync_share_inbox.ps1`。本机任务只拷盘，不抓网站、不发企业微信。电脑开机后才会把暂存包落到图片库。
+
 ### 必须设置 Secret
 
 在 GitHub 仓库页面：

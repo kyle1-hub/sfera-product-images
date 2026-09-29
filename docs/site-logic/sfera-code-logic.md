@@ -38,9 +38,10 @@
 - `sites.sfera.categories`：每项包含展示名称 `name` 和 API slug `slug`。
 - 继承的全局项：`state_dir`、`download_images`、`send_empty_report`、超时等。
 - `share_library_root`：客户网站图片库根目录；路径含中文和双空格，必须原样保留 `06  客户网站图片`。
-- `share_site_folders`：站点到库内一级文件夹的映射，当前只配 `sfera → E03-SFERA`。未映射站点跳过拷盘。一级是网站文件夹，二级是品类文件夹（如 `PENDIENTES`），分类 zip 直接丢进对应品类，不再每天新建日期目录。
+- `share_site_folders`：站点到库内一级文件夹的映射。Sfera 用库内已有的 `E03-SFERA`；其余站默认用网站名建一级文件夹。一级是网站文件夹，二级是品类文件夹（如 `PENDIENTES`），分类 zip 直接丢进对应品类，不再每天新建日期目录。
+- `share_inbox_dir`：GitHub 云端写不了内网盘时，把已发送压缩包暂存在仓库 `share-inbox/<网站文件夹>/<品类>/`。
 - `WECOM_WEBHOOK` 只作为环境变量名存在；任何文档或日志都不得记录其值。
-- 共享盘写入用 Python `shutil.copy2` 写 UNC；拷盘失败不影响企业微信已发送状态。GitHub 云端和关机电脑都写不了这台内网盘。不要写到 ERP 附件上传目录。
+- 共享盘写入用 Python `shutil.copy2` 写 UNC。本机能连盘时直接拷；GitHub 发企业微信成功后改写入 `share-inbox` 并随状态一起提交。本机 `python sfera_monitor.py --sync-share` 再把暂存包拷进图片库，成功后删除暂存文件。不要写到 ERP 附件上传目录。
 
 配置合并由 `load_config()` 和 `site_config()` 完成。站点配置覆盖同名全局配置。
 
@@ -113,7 +114,7 @@ Sfera 有两层判定：
 5. 若总包超过企业微信限制，`split_zip_bundle_by_size()` 按实际压缩体积拆包。
 6. `build_zip_bundle_message()` 生成 Markdown 汇总。
 7. `send_wecom()` 发送文字，`send_wecom_file()` 上传附件。
-8. 企业微信成功后，`copy_zips_to_share()` 把分类 zip 拷到共享盘 `E03-SFERA/<品类>/`，例如 `E03-SFERA/PENDIENTES/`。同品类后续压缩包继续放进同一文件夹；文件名带日期以免覆盖。GitHub 云端或电脑关机写不了内网盘时只记失败，不改已发送状态。
+8. 企业微信成功后，`archive_sent_zips()` 先尝试 `copy_zips_to_share()` 写 `E03-SFERA/<品类>/`。本机连得上共享盘就直接落盘；GitHub 写失败时改写入仓库 `share-inbox/E03-SFERA/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不影响企业微信已发送状态。
 9. 全部成功后清理临时打包目录；失败则保留用于排查。
 
 附件名现在由站点名、分类、数量和 marker 组合。修改打包或企业微信函数会影响所有通用交付站点。

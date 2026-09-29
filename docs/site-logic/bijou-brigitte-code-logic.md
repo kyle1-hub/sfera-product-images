@@ -131,7 +131,7 @@ Bijou 除通用商品字段外，Store 还维护：
 - `prepare_bijou_image_zips()` 为待补图商品生成附件包并控制大小。
 - `send_wecom_file()` 上传 zip。
 - 成功后更新各商品 `image_sent_at`；失败记录错误并在以后重试。
-- 图片包发送成功后会尝试 `copy_zips_to_share()`。已映射站点按「网站/品类」两级落盘。当前共享盘只配了 Sfera 的 `E03-SFERA`，Bijou 未配文件夹时跳过拷盘，不阻塞补图状态。
+- 图片包发送成功后会尝试 `archive_sent_zips()`。本机能写共享盘时落到 `Bijou Brigitte/<品类>/`；GitHub 写失败时改写入仓库 `share-inbox/Bijou Brigitte/<品类>/`，由本机 `--sync-share` 再拷进图片库。拷盘失败不阻塞补图状态。
 
 不要改用 `send_wecom_zip_bundle()` 一次性处理全部 Bijou 交付，因为那会失去文字与图片的独立状态。
 
