@@ -93,11 +93,18 @@ async function buildVault(columns, rows, users) {
       rows: mine.map(({ viewers, ...rest }) => rest),
     };
     if (isAdmin) {
-      payload.users = list.map(x => ({
-        username: String(x.username || "").trim().toUpperCase(),
-        name: x.name || "",
-        password: String(x.password || "").trim().toUpperCase(),
-      }));
+      payload.users = list.map(x => {
+        const un = String(x.username || "").trim().toUpperCase();
+        return {
+          username: un,
+          name: x.name || "",
+          password: String(x.password || "").trim().toUpperCase(),
+          createdBy: x.createdBy || un,
+          createdAt: x.createdAt || "",
+          updatedBy: x.updatedBy || un,
+          updatedAt: x.updatedAt || "",
+        };
+      });
     }
     vaultUsers.push({
       username: uname,
@@ -113,7 +120,7 @@ async function unlockVault(vault, username, password) {
   const raw = String(password || "").trim();
   const hit = (vault.users || []).find(u => String(u.username).toUpperCase() === uname);
   if (!hit) throw new Error("账号不存在");
-  const tries = [...new Set([raw.toUpperCase(), raw, raw.toLowerCase()].filter(Boolean))];
+  const tries = [...new Set([raw.toUpperCase(), raw, raw.toLowerCase(), uname].filter(Boolean))];
   for (const pwd of tries) {
     try {
       return await decryptJson(hit.pack, pwd);

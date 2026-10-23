@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css" />
+<link rel="stylesheet" href="srm.css?v=20261023d" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -22,7 +22,7 @@
   <aside class="sidebar">
     <div class="logo"><span>发</span>发票号查询</div>
     <nav class="menu">
-      <a href="javascript:void(0)" id="navUsers">账号</a>
+      <a href="javascript:void(0)" id="navUsers">账号管控</a>
       <a href="javascript:void(0)" id="navData">业务数据</a>
       <a href="javascript:void(0)" class="active" id="navQuery">数据查询</a>
     </nav>
@@ -40,15 +40,10 @@
         <div class="okmsg" id="msg"></div>
       </div>
       <div class="card table-card" id="panelUsers" style="display:none">
-        <div class="tabs"><span class="on">账号</span></div>
+        <div class="tabs"><span class="on">账号管控</span></div>
         <div class="table-wrap">
           <table>
-            <thead>
-              <tr>
-                <th data-lock="1" style="width:88px">操作</th>
-                <th>供应商</th><th>用户名</th><th>密码</th>
-              </tr>
-            </thead>
+            <thead id="userHead"></thead>
             <tbody id="userBody"></tbody>
           </table>
         </div>
@@ -101,13 +96,22 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261023c"></script>
-<script src="grid.js?v=20261023c"></script>
+<script src="crypto-lib.js?v=20261023d"></script>
+<script src="grid.js?v=20261023d"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
 let dataWidths = [];
-let userWidths = [88, 280, 100, 100];
+const USER_COLS = [
+  { key: "name", label: "供应商" },
+  { key: "username", label: "用户名" },
+  { key: "password", label: "密码" },
+  { key: "createdBy", label: "创建人" },
+  { key: "createdAt", label: "创建时间" },
+  { key: "updatedBy", label: "修改人" },
+  { key: "updatedAt", label: "修改时间" },
+];
+let userWidths = [88, 280, 100, 100, 88, 150, 88, 150];
 let view = "query";
 let currentUser = { username: "", name: "", isAdmin: false };
 let queryWidths = [];
@@ -310,15 +314,24 @@ function ensureAuditCols() {
     found.label = col.label;
   });
 }
+function accountOfRow(row) {
+  const key = supplierField(data.columns);
+  const tokens = supplierTokens(row && key ? row[key] : "");
+  const names = new Set((users.users || []).map(u => String(u.username || "").trim().toUpperCase()).filter(Boolean));
+  const hit = tokens.find(t => names.has(t));
+  if (hit) return hit;
+  const code = tokens.find(t => /^[A-Z]\d{2,4}$/.test(t));
+  return code || operatorName() || "ADMIN";
+}
 function fillAuditFields() {
   ensureAuditCols();
-  const who = (currentUser && (currentUser.username || currentUser.name)) || "系统";
   const t = "2026-10-23 12:00:00";
   (data.rows || []).forEach(r => {
-    if (!String(r.createdBy || "").trim()) r.createdBy = who;
+    const acc = accountOfRow(r);
+    if (!String(r.createdBy || "").trim() || r.createdBy === "系统") r.createdBy = acc;
     if (!String(r.createdAt || "").trim()) r.createdAt = t;
-    if (!String(r.updatedBy || "").trim()) r.updatedBy = r.createdBy;
-    if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt;
+    if (!String(r.updatedBy || "").trim() || r.updatedBy === "系统") r.updatedBy = r.createdBy || acc;
+    if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
     (data.columns || []).forEach(c => {
       if (c.label === "创建人") r[c.key] = r.createdBy;
       if (c.label === "创建时间") r[c.key] = r.createdAt;
@@ -327,12 +340,22 @@ function fillAuditFields() {
     });
   });
 }
+function fillUserAudit() {
+  const t = "2026-10-23 12:00:00";
+  (users.users || []).forEach(u => {
+    const acc = String(u.username || "").trim().toUpperCase() || "ADMIN";
+    if (!String(u.createdBy || "").trim() || u.createdBy === "系统") u.createdBy = acc;
+    if (!String(u.createdAt || "").trim()) u.createdAt = t;
+    if (!String(u.updatedBy || "").trim() || u.updatedBy === "系统") u.updatedBy = acc;
+    if (!String(u.updatedAt || "").trim()) u.updatedAt = u.createdAt || t;
+  });
+}
 function nowText() {
   const d = new Date();
   const p = n => String(n).padStart(2, "0");
   return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 }
-function operatorName() { return currentUser.username || currentUser.name || "管理员"; }
+function operatorName() { return String(currentUser.username || "").trim().toUpperCase() || "ADMIN"; }
 function showCols() {
   return data.columns.filter(c => c.key !== "viewers" && c.label !== "可见用户");
 }
@@ -362,7 +385,7 @@ function setView(name) {
   document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
   document.getElementById("panelData").style.display = name === "data" ? "block" : "none";
   document.getElementById("panelQuery").style.display = name === "query" ? "block" : "none";
-  document.getElementById("crumb").textContent = name === "users" ? "维护 / 账号" : name === "data" ? "维护 / 业务数据" : "查询 / 数据查询";
+  document.getElementById("crumb").textContent = name === "users" ? "维护 / 账号管控" : name === "data" ? "维护 / 业务数据" : "查询 / 数据查询";
   renderFilters();
   renderToolbar();
   if (name === "query") renderQuery();
@@ -382,6 +405,9 @@ function renderToolbar() {
   if (addRow) addRow.onclick = () => openRowModal(-1);
 }
 async function persistAll() {
+  if (!currentUser.isAdmin) return;
+  fillUserAudit();
+  fillAuditFields();
   localStorage.setItem("invoice.data", JSON.stringify(data));
   localStorage.setItem("invoice.users", JSON.stringify(users));
   const list = users.users.filter(u => u.username && u.password);
@@ -402,8 +428,14 @@ function opsHtml(kind, i) {
   </div>`;
 }
 function renderUsers() {
+  fillUserAudit();
   const table = document.querySelector("#panelUsers table");
+  if (!userWidths.length || userWidths.length !== USER_COLS.length + 1) {
+    userWidths = [88, ...USER_COLS.map(c => defaultWidth(c.label))];
+  }
   applyColgroup(table, userWidths);
+  document.getElementById("userHead").innerHTML = "<tr><th data-lock=\"1\">操作</th>" +
+    USER_COLS.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
   const list = filteredUsers();
   const pages = Math.max(1, Math.ceil(list.length / pageSize));
   if (page > pages) page = pages;
@@ -411,12 +443,9 @@ function renderUsers() {
   const slice = list.slice(start, start + pageSize);
   document.getElementById("userBody").innerHTML = slice.map((u) => {
     const i = users.users.indexOf(u);
-    return `<tr>
-      <td>${opsHtml("user", i)}</td>
-      <td title="${esc(u.name)}">${esc(u.name)}</td>
-      <td>${esc(u.username)}</td>
-      <td>${esc(u.password)}</td>
-    </tr>`;
+    return "<tr><td>" + opsHtml("user", i) + "</td>" +
+      USER_COLS.map(c => `<td title="${esc(u[c.key])}">${esc(u[c.key])}</td>`).join("") +
+      "</tr>";
   }).join("");
   bindOps();
   enableResize(table, userWidths);
@@ -521,19 +550,19 @@ document.getElementById("modalOk").onclick = () => {
       name: document.getElementById("f_name").value.trim(),
       password: document.getElementById("f_password").value.trim().toUpperCase(),
     };
-    const who = rec.username || operatorName();
+    const acc = rec.username || operatorName();
     const t = nowText();
     if (modalIndex < 0) {
-      rec.createdBy = who;
+      rec.createdBy = acc;
       rec.createdAt = t;
-      rec.updatedBy = who;
+      rec.updatedBy = acc;
       rec.updatedAt = t;
       users.users.unshift(rec);
       page = 1;
     } else {
-      rec.createdBy = users.users[modalIndex].createdBy || who;
+      rec.createdBy = users.users[modalIndex].createdBy || acc;
       rec.createdAt = users.users[modalIndex].createdAt || t;
-      rec.updatedBy = who;
+      rec.updatedBy = acc;
       rec.updatedAt = t;
       users.users[modalIndex] = rec;
     }
@@ -552,7 +581,7 @@ document.getElementById("modalOk").onclick = () => {
       ask("PO、HO、发票号已存在，不能重复新增");
       return;
     }
-    const who = operatorName();
+    const who = operatorName() || accountOfRow(rec);
     const t = nowText();
     if (modalIndex < 0) {
       rec.createdBy = who;
@@ -593,7 +622,7 @@ function reloadView() {
     const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
     if (savedUsers && savedUsers.users) users = normalizeUsers(savedUsers);
   } catch (e) {}
-  ensureAuditCols();
+  fillUserAudit();
   fillAuditFields();
   page = 1;
   renderUsers();
@@ -613,6 +642,7 @@ function afterLogin() {
   document.getElementById("btnReload").onclick = reloadView;
   document.getElementById("btnOut").onclick = () => {
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem("invoice.vault");
     location.reload();
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
@@ -621,18 +651,14 @@ function afterLogin() {
   setView(currentUser.isAdmin ? "query" : "query");
 }
 async function loadVaultFile() {
-  let remote = null;
   try {
     const r = await fetch("vault.json?t=" + Date.now());
-    if (r.ok) remote = await r.json();
+    if (r.ok) return await r.json();
   } catch (e) {}
-  let local = null;
-  try { local = JSON.parse(localStorage.getItem("invoice.vault") || "null"); } catch (e) {}
-  const remoteN = remote && remote.users ? remote.users.length : 0;
-  const localN = local && local.users ? local.users.length : 0;
-  if (remoteN && (!localN || (remote.builtAt || 0) >= (local.builtAt || 0))) return remote;
-  if (localN) return local;
-  if (remoteN) return remote;
+  try {
+    const local = JSON.parse(localStorage.getItem("invoice.vault") || "null");
+    if (local && local.users && local.users.length) return local;
+  } catch (e) {}
   throw new Error("还没有数据包");
 }
 async function tryLogin(fromSaved) {
@@ -643,8 +669,21 @@ async function tryLogin(fromSaved) {
   document.getElementById("loginUser").value = username;
   if (!username) { err.textContent = "请输入用户名"; return; }
   try {
-    const vault = await loadVaultFile();
-    const payload = await unlockVault(vault, username, password);
+    let payload = null;
+    let lastErr = null;
+    const vaults = [];
+    try { vaults.push(await loadVaultFile()); } catch (e) { lastErr = e; }
+    try {
+      const local = JSON.parse(localStorage.getItem("invoice.vault") || "null");
+      if (local && local.users && local.users.length && local !== vaults[0]) vaults.push(local);
+    } catch (e) {}
+    for (const vault of vaults) {
+      try {
+        payload = await unlockVault(vault, username, password);
+        break;
+      } catch (e) { lastErr = e; }
+    }
+    if (!payload) throw lastErr || new Error("密码不对");
     currentUser = {
       username: payload.username,
       name: payload.name || payload.username,
@@ -653,8 +692,8 @@ async function tryLogin(fromSaved) {
     data.columns = payload.columns || data.columns;
     data.rows = payload.rows || [];
     if (payload.users) users = { users: payload.users };
+    fillUserAudit();
     fillAuditFields();
-    await persistAll();
     if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
     afterLogin();
   } catch (e) {
@@ -676,11 +715,18 @@ function restoreSession() {
 function normalizeUsers(u) {
   const list = (u && u.users) || [];
   return {
-    users: list.map(x => ({
-      username: String(x.username || "").trim().toUpperCase(),
-      name: x.name || "",
-      password: String(x.password || "").trim().toUpperCase(),
-    })),
+    users: list.map(x => {
+      const username = String(x.username || "").trim().toUpperCase();
+      return {
+        username,
+        name: x.name || "",
+        password: String(x.password || "").trim().toUpperCase(),
+        createdBy: x.createdBy || username,
+        createdAt: x.createdAt || "",
+        updatedBy: x.updatedBy || username,
+        updatedAt: x.updatedAt || "",
+      };
+    }),
   };
 }
 Promise.all([
@@ -697,7 +743,7 @@ Promise.all([
   } catch (e) { users = normalizeUsers(u); }
   if (!data.columns) data.columns = [];
   if (!data.rows) data.rows = [];
-  ensureAuditCols();
+  fillUserAudit();
   fillAuditFields();
   restoreSession();
 });
