@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261023d" />
+<link rel="stylesheet" href="srm.css?v=20261023e" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -96,8 +96,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261023d"></script>
-<script src="grid.js?v=20261023d"></script>
+<script src="crypto-lib.js?v=20261023e"></script>
+<script src="grid.js?v=20261023e"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -314,39 +314,33 @@ function ensureAuditCols() {
     found.label = col.label;
   });
 }
-function accountOfRow(row) {
-  const key = supplierField(data.columns);
-  const tokens = supplierTokens(row && key ? row[key] : "");
-  const names = new Set((users.users || []).map(u => String(u.username || "").trim().toUpperCase()).filter(Boolean));
-  const hit = tokens.find(t => names.has(t));
-  if (hit) return hit;
-  const code = tokens.find(t => /^[A-Z]\d{2,4}$/.test(t));
-  return code || operatorName() || "ADMIN";
+function syncAuditKeys(r) {
+  (data.columns || []).forEach(c => {
+    if (c.label === "创建人") r[c.key] = r.createdBy;
+    if (c.label === "创建时间") r[c.key] = r.createdAt;
+    if (c.label === "修改人") r[c.key] = r.updatedBy;
+    if (c.label === "修改时间") r[c.key] = r.updatedAt;
+  });
 }
 function fillAuditFields() {
   ensureAuditCols();
+  const who = operatorName();
   const t = "2026-10-23 12:00:00";
   (data.rows || []).forEach(r => {
-    const acc = accountOfRow(r);
-    if (!String(r.createdBy || "").trim() || r.createdBy === "系统") r.createdBy = acc;
+    if (!String(r.createdBy || "").trim() || r.createdBy === "系统") r.createdBy = who;
     if (!String(r.createdAt || "").trim()) r.createdAt = t;
-    if (!String(r.updatedBy || "").trim() || r.updatedBy === "系统") r.updatedBy = r.createdBy || acc;
+    if (!String(r.updatedBy || "").trim() || r.updatedBy === "系统") r.updatedBy = r.createdBy || who;
     if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
-    (data.columns || []).forEach(c => {
-      if (c.label === "创建人") r[c.key] = r.createdBy;
-      if (c.label === "创建时间") r[c.key] = r.createdAt;
-      if (c.label === "修改人") r[c.key] = r.updatedBy;
-      if (c.label === "修改时间") r[c.key] = r.updatedAt;
-    });
+    syncAuditKeys(r);
   });
 }
 function fillUserAudit() {
+  const who = operatorName();
   const t = "2026-10-23 12:00:00";
   (users.users || []).forEach(u => {
-    const acc = String(u.username || "").trim().toUpperCase() || "ADMIN";
-    if (!String(u.createdBy || "").trim() || u.createdBy === "系统") u.createdBy = acc;
+    if (!String(u.createdBy || "").trim() || u.createdBy === "系统") u.createdBy = who;
     if (!String(u.createdAt || "").trim()) u.createdAt = t;
-    if (!String(u.updatedBy || "").trim() || u.updatedBy === "系统") u.updatedBy = acc;
+    if (!String(u.updatedBy || "").trim() || u.updatedBy === "系统") u.updatedBy = who;
     if (!String(u.updatedAt || "").trim()) u.updatedAt = u.createdAt || t;
   });
 }
@@ -550,19 +544,19 @@ document.getElementById("modalOk").onclick = () => {
       name: document.getElementById("f_name").value.trim(),
       password: document.getElementById("f_password").value.trim().toUpperCase(),
     };
-    const acc = rec.username || operatorName();
+    const who = operatorName();
     const t = nowText();
     if (modalIndex < 0) {
-      rec.createdBy = acc;
+      rec.createdBy = who;
       rec.createdAt = t;
-      rec.updatedBy = acc;
+      rec.updatedBy = who;
       rec.updatedAt = t;
       users.users.unshift(rec);
       page = 1;
     } else {
-      rec.createdBy = users.users[modalIndex].createdBy || acc;
+      rec.createdBy = users.users[modalIndex].createdBy || who;
       rec.createdAt = users.users[modalIndex].createdAt || t;
-      rec.updatedBy = acc;
+      rec.updatedBy = who;
       rec.updatedAt = t;
       users.users[modalIndex] = rec;
     }
@@ -581,7 +575,7 @@ document.getElementById("modalOk").onclick = () => {
       ask("PO、HO、发票号已存在，不能重复新增");
       return;
     }
-    const who = operatorName() || accountOfRow(rec);
+    const who = operatorName();
     const t = nowText();
     if (modalIndex < 0) {
       rec.createdBy = who;
