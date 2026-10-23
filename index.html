@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>发票号查询 · 维护</title>
+<link rel="stylesheet" href="srm.css" />
+</head>
+<body>
+<div class="login-wrap" id="loginBox">
+  <div class="login-card">
+    <div class="login-hd">发票号查询</div>
+    <div class="login-bd">
+      <div class="item"><label>用户名</label><input id="loginUser" autocomplete="username" /></div>
+      <div class="item"><label>密码</label><input id="loginPass" type="password" autocomplete="current-password" /></div>
+      <div class="err" id="loginErr"></div>
+      <button type="button" class="btn" id="btnLogin" style="width:100%">登录</button>
+    </div>
+  </div>
+</div>
+<div class="shell" id="app" style="display:none">
+  <aside class="sidebar">
+    <div class="logo"><span>发</span>发票号查询</div>
+    <nav class="menu">
+      <a href="javascript:void(0)" id="navUsers">账号</a>
+      <a href="javascript:void(0)" id="navData">业务数据</a>
+      <a href="javascript:void(0)" class="active" id="navQuery">数据查询</a>
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb" id="crumb">查询 / 数据查询</div>
+      <div class="user" id="who"></div>
+    </header>
+    <div class="content">
+      <div class="card">
+        <form class="filters" id="filters" onsubmit="return false;"></form>
+        <div class="actions" id="filterActions"></div>
+        <div class="filters" style="gap:8px;justify-content:flex-start" id="toolbar"></div>
+        <div class="okmsg" id="msg"></div>
+      </div>
+      <div class="card table-card" id="panelUsers" style="display:none">
+        <div class="tabs"><span class="on">账号</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-lock="1" style="width:88px">操作</th>
+                <th>供应商</th><th>用户名</th><th>密码</th>
+              </tr>
+            </thead>
+            <tbody id="userBody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="userPager"></div>
+      </div>
+      <div class="card table-card" id="panelData">
+        <div class="tabs"><span class="on">业务数据</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="pager"></div>
+      </div>
+      <div class="card table-card" id="panelQuery" style="display:none">
+        <div class="tabs"><span class="on">查询结果</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="qhead"></thead>
+            <tbody id="qbody"></tbody>
+          </table>
+          <div class="empty" id="qempty" hidden>暂无数据</div>
+        </div>
+        <div class="pager" id="qpager"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal" id="modal">
+  <div class="box">
+    <div class="hd"><span id="modalTitle">编辑</span><button type="button" class="x" id="modalX">×</button></div>
+    <div class="form" id="modalForm"></div>
+    <div class="ft">
+      <button type="button" class="btn" id="modalOk">保存</button>
+      <button type="button" class="btn btn-plain" id="modalCancel">取消</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="dlg">
+  <div class="box" style="width:min(420px,92vw)">
+    <div class="hd"><span>提示</span><button type="button" class="x" id="dlgX">×</button></div>
+    <div class="bd">
+      <span class="qmark">?</span>
+      <div id="dlgText"></div>
+    </div>
+    <div class="ft">
+      <button type="button" class="btn" id="dlgOk">确定</button>
+      <button type="button" class="btn btn-plain" id="dlgCancel">放弃</button>
+    </div>
+  </div>
+</div>
+<script src="crypto-lib.js"></script>
+<script src="grid.js"></script>
+<script>
+let data = { columns: [], rows: [] };
+let users = { users: [] };
+let dataWidths = [];
+let userWidths = [88, 280, 100, 100];
+let view = "query";
+let currentUser = { username: "", name: "", isAdmin: false };
+let queryWidths = [];
+const SESSION_KEY = "invoice.session";
+function isAdminUser(name) { return String(name || "").trim().toUpperCase() === "ADMIN"; }
+let modalKind = "";
+let modalIndex = -1;
+let filters = {};
+let page = 1;
+let pageSize = 100;
+const PAGE_SIZES = [50, 100, 500, 10000];
+function valOf(row, key) { return row[key] == null ? "" : String(row[key]); }
+function scopedRows() {
+  if (currentUser.isAdmin) return data.rows;
+  return data.rows.filter(r => rowVisibleTo(r, currentUser.username, data.columns));
+}
+function filteredRows() {
+  return scopedRows().filter(row =>
+    showCols().every(col => {
+      const q = (filters[col.key] || "").trim().toLowerCase();
+      if (!q) return true;
+      return valOf(row, col.key).toLowerCase().includes(q);
+    })
+  );
+}
+function renderFilters() {
+  const el = document.getElementById("filters");
+  const act = document.getElementById("filterActions");
+  if (view === "users") {
+    el.innerHTML = "";
+    act.innerHTML = "";
+    return;
+  }
+  el.innerHTML = showCols().map(col => `
+    <div class="item">
+      <label>${esc(col.label)}</label>
+      <input data-key="${col.key}" placeholder="请输入" value="${esc(filters[col.key] || "")}" />
+    </div>
+  `).join("");
+  act.innerHTML = `
+    <button type="button" class="btn" id="btnQuery">查询</button>
+    <button type="button" class="btn btn-plain" id="btnReset">重置</button>
+    <button type="button" class="btn btn-plain" id="btnReload2">刷新</button>
+  `;
+  el.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") runQuery(); });
+  });
+  document.getElementById("btnQuery").onclick = runQuery;
+  document.getElementById("btnReset").onclick = () => {
+    filters = {};
+    page = 1;
+    renderFilters();
+    if (view === "query") renderQuery();
+    else renderData();
+  };
+  document.getElementById("btnReload2").onclick = () => {
+    if (typeof reloadView === "function") reloadView();
+    else location.reload();
+  };
+}
+function runQuery() {
+  document.querySelectorAll("#filters input").forEach(inp => {
+    filters[inp.dataset.key] = inp.value;
+  });
+  page = 1;
+  if (view === "query") renderQuery();
+  else renderData();
+}
+function fillPager(elId, total) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (page > pages) page = pages;
+  const start = total ? (page - 1) * pageSize + 1 : 0;
+  const end = Math.min(total, page * pageSize);
+  const opts = PAGE_SIZES.map(n => `<option value="${n}" ${n===pageSize?"selected":""}>${n}条/页</option>`).join("");
+  el.innerHTML = `
+    <span>
+      <select class="pageSize">${opts}</select>
+      共 ${total} 条
+    </span>
+    <span>
+      <button class="pg" data-p="prev" ${page<=1?"disabled":""}>‹</button>
+      ${pageButtons(page, pages)}
+      <button class="pg" data-p="next" ${page>=pages?"disabled":""}>›</button>
+      第 ${start}-${end} 条 / 共 ${total} 条
+    </span>
+  `;
+  el.querySelector(".pageSize").onchange = (e) => {
+    pageSize = Number(e.target.value) || 100;
+    page = 1;
+    if (view === "users") renderUsers();
+    else if (view === "query") renderQuery();
+    else renderData();
+  };
+  el.querySelectorAll(".pg").forEach(btn => {
+    btn.onclick = () => {
+      if (btn.disabled) return;
+      if (btn.dataset.p === "prev") page = Math.max(1, page - 1);
+      else if (btn.dataset.p === "next") page = Math.min(pages, page + 1);
+      else if (btn.dataset.n) page = Number(btn.dataset.n);
+      if (view === "users") renderUsers();
+      else if (view === "query") renderQuery();
+      else renderData();
+    };
+  });
+}
+function renderQuery() {
+  const cols = showCols();
+  const table = document.querySelector("#panelQuery table");
+  if (!queryWidths.length || queryWidths.length !== cols.length) {
+    queryWidths = cols.map(c => defaultWidth(c.label));
+  }
+  applyColgroup(table, queryWidths);
+  document.getElementById("qhead").innerHTML = "<tr>" + cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+  const rows = filteredRows();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (page > pages) page = pages;
+  const start = (page - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+  const empty = document.getElementById("qempty");
+  if (!rows.length) {
+    document.getElementById("qbody").innerHTML = "";
+    empty.hidden = false;
+  } else {
+    empty.hidden = true;
+    document.getElementById("qbody").innerHTML = slice.map(row =>
+      "<tr>" + cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") + "</tr>"
+    ).join("");
+  }
+  enableResize(table, queryWidths);
+  enableReorder(table, (from, to) => {
+    const colsNow = showCols();
+    const next = moveItem(colsNow, from, to);
+    const rest = data.columns.filter(c => c.key === "viewers" || c.label === "可见用户");
+    data.columns = next.concat(rest);
+    queryWidths = moveItem(queryWidths, from, to);
+    renderQuery();
+  });
+  fillPager("qpager", rows.length);
+}
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[ch])); }
+function show(t) {
+  const el = document.getElementById("msg");
+  el.style.display = "block";
+  el.textContent = t;
+}
+const REQUIRED_LABELS = ["PO", "HO", "发票号"];
+const AUDIT_COLS = [
+  { key: "createdBy", label: "创建人" },
+  { key: "createdAt", label: "创建时间" },
+  { key: "updatedBy", label: "修改人" },
+  { key: "updatedAt", label: "修改时间" },
+];
+function ensureAuditCols() {
+  AUDIT_COLS.forEach(col => {
+    if (!data.columns.some(c => c.key === col.key || c.label === col.label)) data.columns.push({ ...col });
+  });
+}
+function nowText() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+function operatorName() { return currentUser.username || currentUser.name || "管理员"; }
+function showCols() {
+  return data.columns.filter(c => c.key !== "viewers" && c.label !== "可见用户");
+}
+function isRequired(label) { return REQUIRED_LABELS.includes(label); }
+function missingRequired(row) {
+  return showCols().filter(c => isRequired(c.label) && !String(row[c.key] == null ? "" : row[c.key]).trim());
+}
+function fieldByLabel(label) {
+  const col = (data.columns || []).find(c => c.label === label);
+  return col ? col.key : "";
+}
+function dupKey(row) {
+  return REQUIRED_LABELS.map(label => String(row[fieldByLabel(label)] == null ? "" : row[fieldByLabel(label)]).trim()).join("||");
+}
+function isDuplicate(row, skipIndex) {
+  const key = dupKey(row);
+  if (!key || key === "||||") return false;
+  return data.rows.some((r, i) => i !== skipIndex && dupKey(r) === key);
+}
+function setView(name) {
+  if (!currentUser.isAdmin && name !== "query") name = "query";
+  view = name;
+  page = 1;
+  document.getElementById("navUsers").classList.toggle("active", name === "users");
+  document.getElementById("navData").classList.toggle("active", name === "data");
+  document.getElementById("navQuery").classList.toggle("active", name === "query");
+  document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
+  document.getElementById("panelData").style.display = name === "data" ? "block" : "none";
+  document.getElementById("panelQuery").style.display = name === "query" ? "block" : "none";
+  document.getElementById("crumb").textContent = name === "users" ? "维护 / 账号" : name === "data" ? "维护 / 业务数据" : "查询 / 数据查询";
+  renderFilters();
+  renderToolbar();
+  if (name === "query") renderQuery();
+  if (name === "data") renderData();
+  if (name === "users") renderUsers();
+}
+function renderToolbar() {
+  const bar = document.getElementById("toolbar");
+  if (view === "users") {
+    bar.innerHTML = `<button class="btn btn-blue" id="addUser">新增账号</button>`;
+  } else {
+    bar.innerHTML = `<button class="btn btn-blue" id="addRow">新增</button>`;
+  }
+  const addUser = document.getElementById("addUser");
+  const addRow = document.getElementById("addRow");
+  if (addUser) addUser.onclick = () => openUserModal(-1);
+  if (addRow) addRow.onclick = () => openRowModal(-1);
+}
+async function persistAll() {
+  localStorage.setItem("invoice.data", JSON.stringify(data));
+  localStorage.setItem("invoice.users", JSON.stringify(users));
+  const list = users.users.filter(u => u.username && u.password);
+  if (!list.length) return;
+  try {
+    const vault = await buildVault(data.columns, data.rows, list);
+    localStorage.setItem("invoice.vault", JSON.stringify(vault));
+  } catch (e) {
+    console.error(e);
+  }
+}
+async function publishVault() { return persistAll(); }
+function opsHtml(kind, i) {
+  return `<div class="ops">
+    <button class="icon-btn" title="新增" data-op="add" data-kind="${kind}" data-i="${i}">＋</button>
+    <button class="icon-btn" title="修改" data-op="edit" data-kind="${kind}" data-i="${i}">✎</button>
+    <button class="icon-btn danger" title="删除" data-op="del" data-kind="${kind}" data-i="${i}">🗑</button>
+  </div>`;
+}
+function renderUsers() {
+  const table = document.querySelector("#panelUsers table");
+  applyColgroup(table, userWidths);
+  const list = users.users;
+  const pages = Math.max(1, Math.ceil(list.length / pageSize));
+  if (page > pages) page = pages;
+  const start = (page - 1) * pageSize;
+  const slice = list.slice(start, start + pageSize);
+  document.getElementById("userBody").innerHTML = slice.map((u) => {
+    const i = users.users.indexOf(u);
+    return `<tr>
+      <td>${opsHtml("user", i)}</td>
+      <td title="${esc(u.name)}">${esc(u.name)}</td>
+      <td>${esc(u.username)}</td>
+      <td>${esc(u.password)}</td>
+    </tr>`;
+  }).join("");
+  bindOps();
+  enableResize(table, userWidths);
+  fillPager("userPager", list.length);
+}
+function renderData() {
+  const cols = showCols();
+  const table = document.querySelector("#panelData table");
+  if (!dataWidths.length || dataWidths.length !== cols.length + 1) {
+    dataWidths = [88, ...cols.map(c => defaultWidth(c.label))];
+  }
+  applyColgroup(table, dataWidths);
+  document.getElementById("thead").innerHTML = "<tr><th data-lock=\"1\">操作</th>" +
+    cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+  const rows = filteredRows();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (page > pages) page = pages;
+  const start = (page - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+  document.getElementById("tbody").innerHTML = slice.map((row) => {
+    const ri = data.rows.indexOf(row);
+    return "<tr><td>" + opsHtml("row", ri) + "</td>" +
+    cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") +
+    "</tr>";
+  }).join("");
+  bindOps();
+  enableResize(table, dataWidths);
+  enableReorder(table, (from, to) => {
+    if (from === 0 || to === 0) return;
+    const colsNow = showCols();
+    const next = moveItem(colsNow, from - 1, to - 1);
+    const rest = data.columns.filter(c => c.key === "viewers" || c.label === "可见用户");
+    data.columns = next.concat(rest);
+    dataWidths = moveItem(dataWidths, from, to);
+    renderData();
+  });
+  fillPager("pager", rows.length);
+}
+function bindOps() {
+  document.querySelectorAll(".icon-btn").forEach(btn => {
+    btn.onclick = () => {
+      const kind = btn.dataset.kind;
+      const op = btn.dataset.op;
+      const i = Number(btn.dataset.i);
+      if (op === "add") {
+        if (kind === "user") openUserModal(-1);
+        else openRowModal(-1);
+      } else if (op === "edit") {
+        if (kind === "user") openUserModal(i);
+        else openRowModal(i);
+      } else if (op === "del") {
+        ask("确定删除这条记录吗？", () => {
+          if (kind === "user") users.users.splice(i, 1);
+          else data.rows.splice(i, 1);
+          renderUsers();
+          renderData();
+          publishVault();
+        });
+        return;
+      }
+    };
+  });
+}
+function openUserModal(i) {
+  modalKind = "user";
+  modalIndex = i;
+  const u = i < 0 ? { username: "", name: "", password: "" } : users.users[i];
+  document.getElementById("modalTitle").textContent = i < 0 ? "新增账号" : "修改账号";
+  document.getElementById("modalForm").innerHTML = `
+    <div class="item"><label>供应商</label><input id="f_name" value="${esc(u.name)}" /></div>
+    <div class="item"><label>用户名</label><input id="f_username" value="${esc(u.username)}" /></div>
+    <div class="item"><label>密码</label><input id="f_password" value="${esc(u.password)}" /></div>
+  `;
+  document.getElementById("modal").classList.add("on");
+}
+function openRowModal(i) {
+  modalKind = "row";
+  modalIndex = i;
+  const cols = showCols();
+  const row = i < 0 ? {} : data.rows[i];
+  document.getElementById("modalTitle").textContent = i < 0 ? "新增" : "修改";
+  document.getElementById("modalForm").innerHTML = cols.filter(c => !["createdBy","createdAt","updatedBy","updatedAt"].includes(c.key)).map(c => `
+    <div class="item"><label>${esc(c.label)}${isRequired(c.label) ? ' <span style="color:#ef4444">*</span>' : ""}</label><input data-key="${c.key}" value="${esc(row[c.key] || "")}" /></div>
+  `).join("");
+  document.getElementById("modal").classList.add("on");
+}
+function ask(text, onOk) {
+  document.getElementById("dlgText").textContent = text;
+  document.getElementById("dlgCancel").style.display = onOk ? "" : "none";
+  document.getElementById("dlg").classList.add("on");
+  const close = () => document.getElementById("dlg").classList.remove("on");
+  document.getElementById("dlgOk").onclick = () => { close(); if (onOk) onOk(); };
+  document.getElementById("dlgCancel").onclick = close;
+  document.getElementById("dlgX").onclick = close;
+}
+document.getElementById("modalCancel").onclick = () => document.getElementById("modal").classList.remove("on");
+document.getElementById("modalX").onclick = () => document.getElementById("modal").classList.remove("on");
+document.getElementById("modalOk").onclick = () => {
+  if (modalKind === "user") {
+    const rec = {
+      username: document.getElementById("f_username").value.trim().toUpperCase(),
+      name: document.getElementById("f_name").value.trim(),
+      password: document.getElementById("f_password").value.trim().toUpperCase(),
+    };
+    const who = rec.username || operatorName();
+    const t = nowText();
+    if (modalIndex < 0) {
+      rec.createdBy = who;
+      rec.createdAt = t;
+      rec.updatedBy = who;
+      rec.updatedAt = t;
+      users.users.unshift(rec);
+      page = 1;
+    } else {
+      rec.createdBy = users.users[modalIndex].createdBy || who;
+      rec.createdAt = users.users[modalIndex].createdAt || t;
+      rec.updatedBy = who;
+      rec.updatedAt = t;
+      users.users[modalIndex] = rec;
+    }
+    renderUsers();
+  } else {
+    const rec = modalIndex < 0 ? { id: uid() } : { ...data.rows[modalIndex] };
+    document.querySelectorAll("#modalForm input").forEach(inp => {
+      if (!["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(inp.dataset.key)) rec[inp.dataset.key] = inp.value;
+    });
+    const miss = missingRequired(rec);
+    if (miss.length) {
+      ask("请填写必填项：" + miss.map(c => c.label).join("、"));
+      return;
+    }
+    if (isDuplicate(rec, modalIndex < 0 ? -1 : modalIndex)) {
+      ask("PO、HO、发票号已存在，不能重复新增");
+      return;
+    }
+    const who = operatorName();
+    const t = nowText();
+    if (modalIndex < 0) {
+      rec.createdBy = who;
+      rec.createdAt = t;
+      rec.updatedBy = who;
+      rec.updatedAt = t;
+      data.rows.unshift(rec);
+      page = 1;
+    } else {
+      rec.createdBy = rec.createdBy || who;
+      rec.createdAt = rec.createdAt || t;
+      rec.updatedBy = who;
+      rec.updatedAt = t;
+      data.rows[modalIndex] = rec;
+    }
+    renderData();
+  }
+  document.getElementById("modal").classList.remove("on");
+  publishVault();
+};
+function download(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setView("users"); };
+document.getElementById("navData").onclick = (e) => { e.preventDefault(); setView("data"); };
+document.getElementById("navQuery").onclick = (e) => { e.preventDefault(); setView("query"); };
+function reloadView() {
+  try {
+    const savedData = JSON.parse(localStorage.getItem("invoice.data") || "null");
+    if (savedData && savedData.rows) data = savedData;
+  } catch (e) {}
+  try {
+    const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
+    if (savedUsers && savedUsers.users) users = normalizeUsers(savedUsers);
+  } catch (e) {}
+  ensureAuditCols();
+  page = 1;
+  renderUsers();
+  renderData();
+  renderQuery();
+  renderFilters();
+  show("已刷新");
+  setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 1200);
+}
+function afterLogin() {
+  document.getElementById("loginBox").style.display = "none";
+  document.getElementById("app").style.display = "grid";
+  document.getElementById("who").innerHTML =
+    (currentUser.name || currentUser.username) +
+    '　<button type="button" class="btn btn-text" id="btnReload">刷新</button>' +
+    '　<button type="button" class="btn btn-text" id="btnOut">退出</button>';
+  document.getElementById("btnReload").onclick = reloadView;
+  document.getElementById("btnOut").onclick = () => {
+    localStorage.removeItem(SESSION_KEY);
+    location.reload();
+  };
+  document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
+  document.getElementById("navData").style.display = currentUser.isAdmin ? "" : "none";
+  document.getElementById("navQuery").style.display = "";
+  setView(currentUser.isAdmin ? "query" : "query");
+}
+async function loadVaultFile() {
+  const local = localStorage.getItem("invoice.vault");
+  if (local) {
+    try { return JSON.parse(local); } catch (e) {}
+  }
+  const r = await fetch("vault.json?t=" + Date.now());
+  if (!r.ok) throw new Error("还没有数据包");
+  return r.json();
+}
+async function tryLogin(fromSaved) {
+  const err = document.getElementById("loginErr");
+  err.textContent = "";
+  const username = document.getElementById("loginUser").value.trim().toUpperCase();
+  const password = document.getElementById("loginPass").value.trim();
+  document.getElementById("loginUser").value = username;
+  if (!username) { err.textContent = "请输入用户名"; return; }
+  try {
+    const vault = await loadVaultFile();
+    const payload = await unlockVault(vault, username, password);
+    currentUser = {
+      username: payload.username,
+      name: payload.name || payload.username,
+      isAdmin: !!payload.isAdmin || isAdminUser(payload.username),
+    };
+    data.columns = payload.columns || data.columns;
+    data.rows = payload.rows || [];
+    if (payload.users) users = { users: payload.users };
+    ensureAuditCols();
+    if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
+    afterLogin();
+  } catch (e) {
+    if (fromSaved) localStorage.removeItem(SESSION_KEY);
+    err.textContent = e.message || "登录失败";
+  }
+}
+document.getElementById("btnLogin").onclick = () => tryLogin(false);
+document.getElementById("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(false); });
+function restoreSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!saved || !saved.username) return;
+    document.getElementById("loginUser").value = saved.username;
+    document.getElementById("loginPass").value = saved.password || "";
+    tryLogin(true);
+  } catch (e) {}
+}
+function normalizeUsers(u) {
+  const list = (u && u.users) || [];
+  return {
+    users: list.map(x => ({
+      username: String(x.username || "").trim().toUpperCase(),
+      name: x.name || "",
+      password: String(x.password || "").trim().toUpperCase(),
+    })),
+  };
+}
+Promise.all([
+  fetch("data.json").then(r => r.ok ? r.json() : { columns: [], rows: [] }).catch(() => ({ columns: [], rows: [] })),
+  fetch("users.json").then(r => r.ok ? r.json() : { users: [] }).catch(() => ({ users: [] })),
+]).then(([d, u]) => {
+  try {
+    const savedData = JSON.parse(localStorage.getItem("invoice.data") || "null");
+    data = savedData && savedData.rows ? savedData : d;
+  } catch (e) { data = d; }
+  try {
+    const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
+    users = normalizeUsers(savedUsers && savedUsers.users ? savedUsers : u);
+  } catch (e) { users = normalizeUsers(u); }
+  if (!data.columns) data.columns = [];
+  if (!data.rows) data.rows = [];
+  ensureAuditCols();
+  const t0 = nowText();
+  data.rows.forEach(r => {
+    if (!r.createdAt) { r.createdAt = t0; r.createdBy = r.createdBy || operatorName(); }
+    if (!r.updatedAt) { r.updatedAt = r.createdAt; r.updatedBy = r.updatedBy || r.createdBy; }
+  });
+  restoreSession();
+});
+</script>
+</body>
+</html>
