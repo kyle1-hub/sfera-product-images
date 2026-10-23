@@ -133,20 +133,44 @@ function filteredRows() {
     })
   );
 }
+function filterCols() {
+  return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
+}
+function filteredUsers() {
+  const qName = (filters.u_name || "").trim().toLowerCase();
+  const qUser = (filters.u_username || "").trim().toLowerCase();
+  return (users.users || []).filter(u => {
+    if (qName && !String(u.name || "").toLowerCase().includes(qName)) return false;
+    if (qUser && !String(u.username || "").toLowerCase().includes(qUser)) return false;
+    return true;
+  });
+}
 function renderFilters() {
   const el = document.getElementById("filters");
   const act = document.getElementById("filterActions");
   if (view === "users") {
-    el.innerHTML = "";
-    act.innerHTML = "";
-    return;
+    el.innerHTML = `
+      <div class="item"><label>供应商</label><input data-key="u_name" placeholder="请输入" value="${esc(filters.u_name || "")}" /></div>
+      <div class="item"><label>用户名</label><input data-key="u_username" placeholder="请输入" value="${esc(filters.u_username || "")}" /></div>
+    `;
+    act.innerHTML = `
+      <button type="button" class="btn" id="btnQuery">查询</button>
+      <button type="button" class="btn btn-plain" id="btnReset">重置</button>
+      <button type="button" class="btn btn-plain" id="btnReload2">刷新</button>
+    `;
+  } else {
+    el.innerHTML = filterCols().map(col => `
+      <div class="item">
+        <label>${esc(col.label)}</label>
+        <input data-key="${col.key}" placeholder="请输入" value="${esc(filters[col.key] || "")}" />
+      </div>
+    `).join("");
+    act.innerHTML = `
+      <button type="button" class="btn" id="btnQuery">查询</button>
+      <button type="button" class="btn btn-plain" id="btnReset">重置</button>
+      <button type="button" class="btn btn-plain" id="btnReload2">刷新</button>
+    `;
   }
-  el.innerHTML = showCols().map(col => `
-    <div class="item">
-      <label>${esc(col.label)}</label>
-      <input data-key="${col.key}" placeholder="请输入" value="${esc(filters[col.key] || "")}" />
-    </div>
-  `).join("");
   act.innerHTML = `
     <button type="button" class="btn" id="btnQuery">查询</button>
     <button type="button" class="btn btn-plain" id="btnReset">重置</button>
@@ -161,6 +185,7 @@ function renderFilters() {
     page = 1;
     renderFilters();
     if (view === "query") renderQuery();
+    else if (view === "users") renderUsers();
     else renderData();
   };
   document.getElementById("btnReload2").onclick = () => {
@@ -174,6 +199,7 @@ function runQuery() {
   });
   page = 1;
   if (view === "query") renderQuery();
+  else if (view === "users") renderUsers();
   else renderData();
 }
 function fillPager(elId, total) {
@@ -346,7 +372,7 @@ function opsHtml(kind, i) {
 function renderUsers() {
   const table = document.querySelector("#panelUsers table");
   applyColgroup(table, userWidths);
-  const list = users.users;
+  const list = filteredUsers();
   const pages = Math.max(1, Math.ceil(list.length / pageSize));
   if (page > pages) page = pages;
   const start = (page - 1) * pageSize;
