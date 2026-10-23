@@ -295,6 +295,16 @@ function ensureAuditCols() {
     if (!data.columns.some(c => c.key === col.key || c.label === col.label)) data.columns.push({ ...col });
   });
 }
+function fillAuditFields() {
+  const who = "系统";
+  const t = "2026-10-23 12:00:00";
+  (data.rows || []).forEach(r => {
+    if (!String(r.createdBy || "").trim()) r.createdBy = who;
+    if (!String(r.createdAt || "").trim()) r.createdAt = t;
+    if (!String(r.updatedBy || "").trim()) r.updatedBy = r.createdBy || who;
+    if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
+  });
+}
 function nowText() {
   const d = new Date();
   const p = n => String(n).padStart(2, "0");
@@ -562,6 +572,7 @@ function reloadView() {
     if (savedUsers && savedUsers.users) users = normalizeUsers(savedUsers);
   } catch (e) {}
   ensureAuditCols();
+  fillAuditFields();
   page = 1;
   renderUsers();
   renderData();
@@ -615,6 +626,7 @@ async function tryLogin(fromSaved) {
     data.rows = payload.rows || [];
     if (payload.users) users = { users: payload.users };
     ensureAuditCols();
+    fillAuditFields();
     if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
     afterLogin();
   } catch (e) {
@@ -658,11 +670,7 @@ Promise.all([
   if (!data.columns) data.columns = [];
   if (!data.rows) data.rows = [];
   ensureAuditCols();
-  const t0 = nowText();
-  data.rows.forEach(r => {
-    if (!r.createdAt) { r.createdAt = t0; r.createdBy = r.createdBy || operatorName(); }
-    if (!r.updatedAt) { r.updatedAt = r.createdAt; r.updatedBy = r.updatedBy || r.createdBy; }
-  });
+  fillAuditFields();
   restoreSession();
 });
 </script>
