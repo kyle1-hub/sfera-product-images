@@ -101,8 +101,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js"></script>
-<script src="grid.js"></script>
+<script src="crypto-lib.js?v=20261023c"></script>
+<script src="grid.js?v=20261023c"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -291,18 +291,40 @@ const AUDIT_COLS = [
   { key: "updatedAt", label: "修改时间" },
 ];
 function ensureAuditCols() {
+  if (!data.columns) data.columns = [];
   AUDIT_COLS.forEach(col => {
-    if (!data.columns.some(c => c.key === col.key || c.label === col.label)) data.columns.push({ ...col });
+    const found = data.columns.find(c => c.key === col.key || c.label === col.label);
+    if (!found) {
+      data.columns.push({ ...col });
+      return;
+    }
+    if (found.key !== col.key) {
+      const oldKey = found.key;
+      found.key = col.key;
+      (data.rows || []).forEach(r => {
+        const oldVal = r[oldKey];
+        if ((r[col.key] == null || r[col.key] === "") && oldVal != null && oldVal !== "") r[col.key] = oldVal;
+        if (oldKey !== col.key) delete r[oldKey];
+      });
+    }
+    found.label = col.label;
   });
 }
 function fillAuditFields() {
-  const who = "系统";
+  ensureAuditCols();
+  const who = (currentUser && (currentUser.username || currentUser.name)) || "系统";
   const t = "2026-10-23 12:00:00";
   (data.rows || []).forEach(r => {
     if (!String(r.createdBy || "").trim()) r.createdBy = who;
     if (!String(r.createdAt || "").trim()) r.createdAt = t;
-    if (!String(r.updatedBy || "").trim()) r.updatedBy = r.createdBy || who;
-    if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
+    if (!String(r.updatedBy || "").trim()) r.updatedBy = r.createdBy;
+    if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt;
+    (data.columns || []).forEach(c => {
+      if (c.label === "创建人") r[c.key] = r.createdBy;
+      if (c.label === "创建时间") r[c.key] = r.createdAt;
+      if (c.label === "修改人") r[c.key] = r.updatedBy;
+      if (c.label === "修改时间") r[c.key] = r.updatedAt;
+    });
   });
 }
 function nowText() {
@@ -599,13 +621,19 @@ function afterLogin() {
   setView(currentUser.isAdmin ? "query" : "query");
 }
 async function loadVaultFile() {
-  const local = localStorage.getItem("invoice.vault");
-  if (local) {
-    try { return JSON.parse(local); } catch (e) {}
-  }
-  const r = await fetch("vault.json?t=" + Date.now());
-  if (!r.ok) throw new Error("还没有数据包");
-  return r.json();
+  let remote = null;
+  try {
+    const r = await fetch("vault.json?t=" + Date.now());
+    if (r.ok) remote = await r.json();
+  } catch (e) {}
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem("invoice.vault") || "null"); } catch (e) {}
+  const remoteN = remote && remote.users ? remote.users.length : 0;
+  const localN = local && local.users ? local.users.length : 0;
+  if (remoteN && (!localN || (remote.builtAt || 0) >= (local.builtAt || 0))) return remote;
+  if (localN) return local;
+  if (remoteN) return remote;
+  throw new Error("还没有数据包");
 }
 async function tryLogin(fromSaved) {
   const err = document.getElementById("loginErr");
@@ -625,8 +653,8 @@ async function tryLogin(fromSaved) {
     data.columns = payload.columns || data.columns;
     data.rows = payload.rows || [];
     if (payload.users) users = { users: payload.users };
-    ensureAuditCols();
     fillAuditFields();
+    await persistAll();
     if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
     afterLogin();
   } catch (e) {

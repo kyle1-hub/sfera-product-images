@@ -105,7 +105,7 @@ async function buildVault(columns, rows, users) {
       pack: await encryptJson(payload, pwd),
     });
   }
-  return { v: 1, users: vaultUsers };
+  return { v: 2, builtAt: Date.now(), users: vaultUsers };
 }
 
 async function unlockVault(vault, username, password) {
