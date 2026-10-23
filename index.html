@@ -4,7 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261023e" />
+<link rel="stylesheet" href="srm.css?v=20261023f" />
+<script>
+try {
+  var _s = JSON.parse(localStorage.getItem("invoice.session") || "null");
+  document.documentElement.className = (_s && _s.username) ? "booting" : "need-login";
+} catch (e) {
+  document.documentElement.className = "need-login";
+}
+</script>
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -96,8 +104,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261023e"></script>
-<script src="grid.js?v=20261023e"></script>
+<script src="crypto-lib.js?v=20261023f"></script>
+<script src="grid.js?v=20261023f"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -627,8 +635,9 @@ function reloadView() {
   setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 1200);
 }
 function afterLogin() {
+  document.documentElement.className = "in-app";
   document.getElementById("loginBox").style.display = "none";
-  document.getElementById("app").style.display = "grid";
+  document.getElementById("app").style.display = "grid";}
   document.getElementById("who").innerHTML =
     (currentUser.name || currentUser.username) +
     '　<button type="button" class="btn btn-text" id="btnReload">刷新</button>' +
@@ -691,7 +700,12 @@ async function tryLogin(fromSaved) {
     if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
     afterLogin();
   } catch (e) {
-    if (fromSaved) localStorage.removeItem(SESSION_KEY);
+    if (fromSaved) {
+      localStorage.removeItem(SESSION_KEY);
+      document.documentElement.className = "need-login";
+      document.getElementById("loginBox").style.display = "";
+      document.getElementById("app").style.display = "none";
+    }
     err.textContent = e.message || "登录失败";
   }
 }
@@ -700,11 +714,18 @@ document.getElementById("loginPass").addEventListener("keydown", e => { if (e.ke
 function restoreSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    if (!saved || !saved.username) return;
+    if (!saved || !saved.username) {
+      document.documentElement.className = "need-login";
+      return;
+    }
+    document.documentElement.className = "booting";
+    document.getElementById("loginBox").style.display = "none";
     document.getElementById("loginUser").value = saved.username;
     document.getElementById("loginPass").value = saved.password || "";
     tryLogin(true);
-  } catch (e) {}
+  } catch (e) {
+    document.documentElement.className = "need-login";
+  }
 }
 function normalizeUsers(u) {
   const list = (u && u.users) || [];
