@@ -121,7 +121,8 @@ body {
   height: 30px; border: 1px solid var(--srm-border); border-radius: 2px;
   padding: 0 8px; font: inherit; width: 168px; min-width: 168px; max-width: 168px; outline: none; background: #fff;
 }
-.item input:focus { border-color: var(--srm-green); }
+.item input:focus, .item select:focus { border-color: var(--srm-green); }
+.item select { appearance: auto; }
 .actions { width: 100%; display: flex; justify-content: center; gap: 10px; padding: 8px 0 4px; }
 .btn {
   height: 30px; padding: 0 18px; border: 0; border-radius: 2px;

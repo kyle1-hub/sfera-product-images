@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026g" />
+<link rel="stylesheet" href="srm.css?v=20261026h" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -108,8 +108,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026g"></script>
-<script src="grid.js?v=20261026g"></script>
+<script src="crypto-lib.js?v=20261026h"></script>
+<script src="grid.js?v=20261026h"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -184,11 +184,31 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员"];
+function sourceRowsForFilters() {
+  if (view === "pack") return scopedPackRows();
+  if (view === "users") return users.users || [];
+  return scopedRows();
+}
+function distinctOptions(col) {
+  const key = col.key === "u_name" ? "name" : col.key;
+  const set = new Set();
+  sourceRowsForFilters().forEach(r => {
+    const v = String(r[key] == null ? "" : r[key]).trim();
+    if (v) set.add(v);
+  });
+  return [...set].sort((a, b) => a.localeCompare(b, "zh"));
+}
+function isDropdownCol(col) {
+  return DROPDOWN_LABELS.includes(col.label);
+}
 function matchFilters(row, cols) {
   return cols.every(col => {
-    const q = (filters[col.key] || "").trim().toLowerCase();
+    const q = (filters[col.key] || "").trim();
     if (!q) return true;
-    return valOf(row, col.key).toLowerCase().includes(q);
+    const v = valOf(row, col.key);
+    if (isDropdownCol(col)) return v === q;
+    return v.toLowerCase().includes(q.toLowerCase());
   });
 }
 function filteredDataRows() {
@@ -217,31 +237,29 @@ function filteredUsers() {
     return true;
   });
 }
+function filterControl(col) {
+  const val = filters[col.key] || "";
+  if (isDropdownCol(col)) {
+    const opts = distinctOptions(col);
+    return `<div class="item"><label>${esc(col.label)}</label>
+      <select data-key="${col.key}">
+        <option value="">请选择</option>
+        ${opts.map(o => `<option value="${esc(o)}" ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+  return `<div class="item"><label>${esc(col.label)}</label>
+    <input data-key="${col.key}" placeholder="请输入" value="${esc(val)}" />
+  </div>`;
+}
 function renderFilters() {
   const el = document.getElementById("filters");
   const act = document.getElementById("filterActions");
   if (view === "users") {
-    el.innerHTML = `
-      <div class="item"><label>供应商</label><input data-key="u_name" placeholder="请输入" value="${esc(filters.u_name || "")}" /></div>
-      <div class="item"><label>用户名</label><input data-key="u_username" placeholder="请输入" value="${esc(filters.u_username || "")}" /></div>
-    `;
-    act.innerHTML = `
-      <button type="button" class="btn" id="btnQuery">查询</button>
-      <button type="button" class="btn btn-plain" id="btnReset">重置</button>
-      <button type="button" class="btn btn-plain" id="btnReload2">刷新</button>
-    `;
+    el.innerHTML = filterControl({ key: "u_name", label: "供应商" }) +
+      `<div class="item"><label>用户名</label><input data-key="u_username" placeholder="请输入" value="${esc(filters.u_username || "")}" /></div>`;
   } else {
-    el.innerHTML = filterCols().map(col => `
-      <div class="item">
-        <label>${esc(col.label)}</label>
-        <input data-key="${col.key}" placeholder="请输入" value="${esc(filters[col.key] || "")}" />
-      </div>
-    `).join("");
-    act.innerHTML = `
-      <button type="button" class="btn" id="btnQuery">查询</button>
-      <button type="button" class="btn btn-plain" id="btnReset">重置</button>
-      <button type="button" class="btn btn-plain" id="btnReload2">刷新</button>
-    `;
+    el.innerHTML = filterCols().map(col => filterControl(col)).join("");
   }
   act.innerHTML = `
     <button type="button" class="btn" id="btnQuery">查询</button>
@@ -250,6 +268,9 @@ function renderFilters() {
   `;
   el.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("keydown", e => { if (e.key === "Enter") runQuery(); });
+  });
+  el.querySelectorAll("select").forEach(sel => {
+    sel.addEventListener("change", () => { filters[sel.dataset.key] = sel.value; });
   });
   document.getElementById("btnQuery").onclick = runQuery;
   document.getElementById("btnReset").onclick = () => {
@@ -267,7 +288,7 @@ function renderFilters() {
   };
 }
 function runQuery() {
-  document.querySelectorAll("#filters input").forEach(inp => {
+  document.querySelectorAll("#filters input, #filters select").forEach(inp => {
     filters[inp.dataset.key] = inp.value;
   });
   page = 1;
@@ -608,6 +629,7 @@ function bindOps() {
           else data.rows.splice(i, 1);
           renderUsers();
           renderData();
+          renderFilters();
           publishVault();
         });
         return;
@@ -707,6 +729,7 @@ document.getElementById("modalOk").onclick = () => {
   }
   document.getElementById("modal").classList.remove("on");
   publishVault();
+  renderFilters();
 };
 function download(name, obj) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
