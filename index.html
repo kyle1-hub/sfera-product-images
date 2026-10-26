@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026v" />
+<link rel="stylesheet" href="srm.css?v=20261026w" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026v"></script>
-<script src="grid.js?v=20261026v"></script>
+<script src="crypto-lib.js?v=20261026w"></script>
+<script src="grid.js?v=20261026w"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -548,8 +548,8 @@ async function exportPackLabels() {
     const startRow = 17;
     const lastData = startRow + picked.length - 1;
     const srcRow = ws.getRow(startRow);
-    const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E79" } };
-    const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+    const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0070C0" } };
+    const headerFont = { name: "Calibri", color: { argb: "FFFFFFFF" }, bold: true };
     const dataFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
     const dataFont = { color: { argb: "FF000000" } };
     for (let c = 2; c <= 24; c++) {
@@ -612,7 +612,8 @@ async function exportPackLabels() {
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = (inv || countries[0] || "A71") + "箱贴.xlsx";
+    const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
+    a.download = shipNo + "-A71导箱贴文件.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
   } catch (e) {
