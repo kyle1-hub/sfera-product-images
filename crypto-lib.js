@@ -121,17 +121,21 @@ async function buildVault(columns, rows, users, packing) {
   return { v: 2, builtAt: Date.now(), users: vaultUsers };
 }
 
-async function unlockVault(vault, username, password) {
-  const uname = String(username || "").trim().toUpperCase();
+async function unlockPack(pack, password) {
   const raw = String(password || "").trim();
-  const hit = (vault.users || []).find(u => String(u.username).toUpperCase() === uname);
-  if (!hit) throw new Error("账号不存在");
   if (!raw) throw new Error("请输入密码");
   const tries = [...new Set([raw, raw.toUpperCase(), raw.toLowerCase()].filter(Boolean))];
   for (const pwd of tries) {
     try {
-      return await decryptJson(hit.pack, pwd);
+      return await decryptJson(pack, pwd);
     } catch (e) {}
   }
   throw new Error("密码不对");
+}
+async function unlockVault(vault, username, password) {
+  const uname = String(username || "").trim().toUpperCase();
+  const hit = (vault.users || []).find(u => String(u.username).toUpperCase() === uname);
+  if (!hit) throw new Error("账号不存在");
+  const pack = hit.pack || hit;
+  return unlockPack(pack, password);
 }

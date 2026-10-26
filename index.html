@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026w" />
+<link rel="stylesheet" href="srm.css?v=20261026x" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026w"></script>
-<script src="grid.js?v=20261026w"></script>
+<script src="crypto-lib.js?v=20261026x"></script>
+<script src="grid.js?v=20261026x"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -854,9 +854,6 @@ function fillAuditFields() {
     if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
     syncAuditKeys(r);
   });
-  (packing.rows || []).forEach(r => {
-    if (r.country != null) r.country = formatCountry(r.country);
-  });
 }
 function fillUserAudit() {
   const who = operatorName();
@@ -1260,16 +1257,11 @@ function afterLogin() {
     });
   }
 }
-async function loadVaultFile() {
-  try {
-    const r = await fetch("vault.json?t=" + Date.now());
-    if (r.ok) return await r.json();
-  } catch (e) {}
-  try {
-    const local = JSON.parse(localStorage.getItem("invoice.vault") || "null");
-    if (local && local.users && local.users.length) return local;
-  } catch (e) {}
-  throw new Error("还没有数据包");
+async function loadUserPack(username) {
+  const uname = String(username || "").trim().toUpperCase();
+  const r = await fetch("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  if (!r.ok) throw new Error("账号不存在");
+  return r.json();
 }
 async function tryLogin(fromSaved) {
   const err = document.getElementById("loginErr");
@@ -1280,21 +1272,8 @@ async function tryLogin(fromSaved) {
   if (!username) { err.textContent = "请输入用户名"; return; }
   if (!password) { err.textContent = "请输入密码"; return; }
   try {
-    let payload = null;
-    let lastErr = null;
-    const vaults = [];
-    try { vaults.push(await loadVaultFile()); } catch (e) { lastErr = e; }
-    try {
-      const local = JSON.parse(localStorage.getItem("invoice.vault") || "null");
-      if (local && local.users && local.users.length && local !== vaults[0]) vaults.push(local);
-    } catch (e) {}
-    for (const vault of vaults) {
-      try {
-        payload = await unlockVault(vault, username, password);
-        break;
-      } catch (e) { lastErr = e; }
-    }
-    if (!payload) throw lastErr || new Error("密码不对");
+    const pack = await loadUserPack(username);
+    const payload = await unlockPack(pack, password);
     currentUser = {
       username: payload.username,
       name: payload.name || payload.username,
