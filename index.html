@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026t" />
+<link rel="stylesheet" href="srm.css?v=20261026u" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026t"></script>
-<script src="grid.js?v=20261026t"></script>
+<script src="crypto-lib.js?v=20261026u"></script>
+<script src="grid.js?v=20261026u"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -487,8 +487,42 @@ function syncPackCheckAll(rows) {
   all.indeterminate = n > 0 && n < official.length;
 }
 function numVal(v) {
-  const n = Number(String(v == null ? "" : v).replace(/,/g, ""));
-  return Number.isFinite(n) ? n : v || "";
+  const s = String(v == null ? "" : v).trim();
+  if (!s || s === "-" ) return "";
+  const n = Number(s.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : s;
+}
+function cloneCellStyle(from, to) {
+  if (!from || !to) return;
+  to.style = Object.assign({}, from.style || {});
+  if (from.font) to.font = Object.assign({}, from.font);
+  if (from.alignment) to.alignment = Object.assign({}, from.alignment);
+  if (from.border) to.border = JSON.parse(JSON.stringify(from.border));
+  if (from.fill) to.fill = JSON.parse(JSON.stringify(from.fill));
+  if (from.numFmt) to.numFmt = from.numFmt;
+}
+function templateCountry(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const key = s.split("-")[0].trim().toUpperCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "");
+  const drop = {
+    ARGENTINA: "ARGENTINA - 阿根廷",
+    MEXICO: "MEXICO - 墨西哥",
+    CHILE: "CHILE - 智利",
+    PERU: "PERÚ - 秘鲁",
+    BRAZIL: "BRAZIL - 巴西",
+    PARAGUAY: "PARAGUAY - 巴拉圭",
+    GUATEMALA: "GUATEMALA - 危地马拉",
+    ELSALVADOR: "EL SALVADOR - 萨尔瓦多",
+    URUGUAY: "URUGUAY - 乌拉圭",
+    ESPANA: "ESPAÑA - 西班牙",
+    SPAIN: "ESPAÑA - 西班牙",
+    BOLIVIA: "BOLIVIA - 玻利维亚",
+  };
+  if (drop[key]) return drop[key];
+  const hit = Object.keys(drop).find(k => key.includes(k) || k.includes(key));
+  return hit ? drop[hit] : s;
 }
 async function exportPackLabels() {
   const list = filteredPackList();
@@ -502,6 +536,11 @@ async function exportPackLabels() {
   });
   if (bad.length) { ask(bad.join("；")); return; }
   if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
+  if (countries.length > 1) {
+    ask("勾选的明细包含多个国家，请按同一国家导出");
+    return;
+  }
   try {
     if (typeof ExcelJS === "undefined") throw new Error("导出组件未加载");
     const res = await fetch("A71-label-template.xlsx?t=" + Date.now());
@@ -510,34 +549,56 @@ async function exportPackLabels() {
     await wb.xlsx.load(await res.arrayBuffer());
     const ws = wb.getWorksheet("Template") || wb.worksheets[0];
     const startRow = 17;
-    if (picked.length > 1) {
-      ws.spliceRows(startRow + 1, 0, ...Array.from({ length: picked.length - 1 }, () => []));
+    const lastData = startRow + picked.length - 1;
+    const srcRow = ws.getRow(startRow);
+    for (let r = startRow + 1; r <= Math.max(lastData, 22); r++) {
+      for (let c = 2; c <= 24; c++) cloneCellStyle(srcRow.getCell(c), ws.getRow(r).getCell(c));
     }
     const inv = picked.map(r => r.invoice).find(v => String(v || "").trim());
     if (inv) ws.getCell("Q6").value = inv;
+    if (countries[0]) ws.getCell("Q8").value = countries[0];
+    const cols = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R"];
     picked.forEach((row, i) => {
       const r = startRow + i;
-      ws.getCell("D" + r).value = row.po || "";
-      ws.getCell("E" + r).value = numVal(row.qtp);
-      ws.getCell("F" + r).value = numVal(row.packlong);
-      ws.getCell("G" + r).value = numVal(row.packwidth);
-      ws.getCell("H" + r).value = numVal(row.packhigh);
-      ws.getCell("I" + r).value = numVal(row.cbm);
-      ws.getCell("J" + r).value = numVal(row.gross);
-      ws.getCell("K" + r).value = numVal(row.net);
-      ws.getCell("L" + r).value = row.supplierCode || "";
-      ws.getCell("M" + r).value = row.ho || "";
-      ws.getCell("N" + r).value = row.ean || "";
-      ws.getCell("O" + r).value = row.ce || "";
-      ws.getCell("P" + r).value = row.description || "";
-      ws.getCell("Q" + r).value = numVal(row.perCarton);
-      ws.getCell("R" + r).value = numVal(row.totalPcs);
+      const vals = {
+        D: row.po || "",
+        E: numVal(row.qtp),
+        F: numVal(row.packlong),
+        G: numVal(row.packwidth),
+        H: numVal(row.packhigh),
+        I: numVal(row.cbm),
+        J: numVal(row.gross),
+        K: numVal(row.net),
+        L: row.supplierCode || "",
+        M: row.ho || "",
+        N: row.ean || "",
+        O: row.ce || "",
+        P: row.description || "",
+        Q: numVal(row.perCarton),
+        R: numVal(row.totalPcs),
+      };
+      cols.forEach(col => {
+        const cell = ws.getCell(col + r);
+        const v = vals[col];
+        cell.value = v === "" ? null : v;
+      });
+    });
+    for (let r = lastData + 1; r <= 30; r++) {
+      cols.forEach(col => { ws.getCell(col + r).value = null; });
+    }
+    const end = Math.max(lastData, startRow);
+    ["B31", "E31", "I31", "J31", "K31"].forEach(addr => {
+      const cell = ws.getCell(addr);
+      const f = String(cell.value && cell.value.formula ? cell.value.formula : cell.value || "");
+      if (/17:.*22/.test(f)) {
+        cell.value = { formula: f.replace(/17:([A-Z]*)22/g, "17:$1" + end) };
+      }
     });
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = (inv || "A71") + "箱贴.xlsx";
+    a.download = (inv || countries[0] || "A71") + "箱贴.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
   } catch (e) {
