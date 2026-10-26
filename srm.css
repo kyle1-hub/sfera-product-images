@@ -123,6 +123,19 @@ body {
 }
 .item input:focus, .item select:focus { border-color: var(--srm-green); }
 .item select { appearance: auto; }
+.combo { position: relative; }
+.combo-box { position: relative; width: 168px; }
+.combo-box input { width: 168px; min-width: 168px; max-width: 168px; }
+.combo-list {
+  position: absolute; left: 0; right: 0; top: 32px; z-index: 20;
+  max-height: 220px; overflow: auto; background: #fff;
+  border: 1px solid var(--srm-border); box-shadow: 0 8px 18px rgba(15,23,42,.12);
+}
+.combo-list button {
+  display: block; width: 100%; text-align: left; border: 0; background: #fff;
+  padding: 6px 8px; font: inherit; cursor: pointer; color: #2d3748; white-space: nowrap;
+}
+.combo-list button:hover { background: #e6f6f3; color: var(--srm-green); }
 .actions { width: 100%; display: flex; justify-content: center; gap: 10px; padding: 8px 0 4px; }
 .btn {
   height: 30px; padding: 0 18px; border: 0; border-radius: 2px;
