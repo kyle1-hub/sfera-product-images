@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026h" />
+<link rel="stylesheet" href="srm.css?v=20261026i" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -108,8 +108,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026h"></script>
-<script src="grid.js?v=20261026h"></script>
+<script src="crypto-lib.js?v=20261026i"></script>
+<script src="grid.js?v=20261026i"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -451,6 +451,7 @@ function fillAuditFields() {
   const who = operatorName();
   const t = "2026-10-23 12:00:00";
   (data.rows || []).forEach(r => {
+    applyCountryFormat(r);
     if (!String(r.createdBy || "").trim() || r.createdBy === "系统") r.createdBy = who;
     if (!String(r.createdAt || "").trim()) r.createdAt = t;
     if (!String(r.updatedBy || "").trim() || r.updatedBy === "系统") r.updatedBy = r.createdBy || who;
@@ -485,8 +486,42 @@ function fieldByLabel(label) {
   const col = (data.columns || []).find(c => c.label === label);
   return col ? col.key : "";
 }
+const COUNTRY_EN = {
+  "玻利维亚": "BOLIVIA", "巴西": "BRAZIL", "巴拉圭": "PARAGUAY", "乌拉圭": "URUGUAY",
+  "危地马拉": "GUATEMALA", "萨尔瓦多": "EL SALVADOR", "秘鲁": "PERU", "智利": "CHILE",
+  "阿根廷": "ARGENTINA", "墨西哥": "MEXICO"
+};
+const COUNTRY_CN = Object.fromEntries(Object.entries(COUNTRY_EN).map(([k, v]) => [v, k]));
+function formatCountry(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  if (s.includes("-")) {
+    const i = s.indexOf("-");
+    const left = s.slice(0, i).trim();
+    const right = s.slice(i + 1).trim();
+    if (/[A-Za-z]/.test(left) && /[一-鿿]/.test(right)) return left.toUpperCase() + " - " + right;
+    if (/[一-鿿]/.test(left) && /[A-Za-z]/.test(right)) return right.toUpperCase() + " - " + left;
+  }
+  if (COUNTRY_EN[s]) return COUNTRY_EN[s] + " - " + s;
+  const up = s.toUpperCase();
+  if (COUNTRY_CN[up]) return up + " - " + COUNTRY_CN[up];
+  return s;
+}
+function splitSuppliers(v) {
+  return String(v || "").split(/[,，;；]+/).map(x => x.trim()).filter(Boolean);
+}
+function supplierCodeOf(part) {
+  const m = String(part || "").trim().match(/^([A-Za-z]\d{2,4})/);
+  return m ? m[1].toUpperCase() : "";
+}
+function applyCountryFormat(row) {
+  const key = fieldByLabel("国家");
+  if (key) row[key] = formatCountry(row[key]);
+  return row;
+}
 function dupKey(row) {
-  return REQUIRED_LABELS.map(label => String(row[fieldByLabel(label)] == null ? "" : row[fieldByLabel(label)]).trim()).join("||");
+  const labels = REQUIRED_LABELS.concat(["供应商"]);
+  return labels.map(label => String(row[fieldByLabel(label)] == null ? "" : row[fieldByLabel(label)]).trim()).join("||");
 }
 function isDuplicate(row, skipIndex) {
   const key = dupKey(row);
@@ -700,14 +735,34 @@ document.getElementById("modalOk").onclick = () => {
     document.querySelectorAll("#modalForm input").forEach(inp => {
       if (!["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(inp.dataset.key)) rec[inp.dataset.key] = inp.value;
     });
+    applyCountryFormat(rec);
+    const supKey = fieldByLabel("供应商");
+    const parts = splitSuppliers(rec[supKey]);
+    if (parts.length > 1) {
+      rec[supKey] = parts[0];
+      rec.viewers = (supplierCodeOf(parts[0]) || rec.viewers || "").toLowerCase();
+    } else if (parts.length === 1) {
+      rec[supKey] = parts[0];
+      rec.viewers = (supplierCodeOf(parts[0]) || rec.viewers || "").toLowerCase();
+    }
     const miss = missingRequired(rec);
     if (miss.length) {
       ask("请填写必填项：" + miss.map(c => c.label).join("、"));
       return;
     }
-    if (isDuplicate(rec, modalIndex < 0 ? -1 : modalIndex)) {
-      ask("PO、HO、发票号已存在，不能重复新增");
-      return;
+    const extras = parts.slice(1).map((part, i) => {
+      const nr = { ...rec, id: uid() + "-" + (i + 1) };
+      nr[supKey] = part;
+      nr.viewers = (supplierCodeOf(part) || "").toLowerCase();
+      return nr;
+    });
+    const checkList = [rec, ...extras];
+    for (const one of checkList) {
+      const skip = modalIndex < 0 || one !== rec ? -1 : modalIndex;
+      if (isDuplicate(one, skip)) {
+        ask("PO、HO、发票号已存在，不能重复新增");
+        return;
+      }
     }
     const who = operatorName();
     const t = nowText();
@@ -716,14 +771,20 @@ document.getElementById("modalOk").onclick = () => {
       rec.createdAt = t;
       rec.updatedBy = who;
       rec.updatedAt = t;
-      data.rows.unshift(rec);
+      extras.forEach(nr => {
+        nr.createdBy = who; nr.createdAt = t; nr.updatedBy = who; nr.updatedAt = t;
+      });
+      data.rows.unshift(rec, ...extras);
       page = 1;
     } else {
       rec.createdBy = rec.createdBy || who;
       rec.createdAt = rec.createdAt || t;
       rec.updatedBy = who;
       rec.updatedAt = t;
-      data.rows[modalIndex] = rec;
+      extras.forEach(nr => {
+        nr.createdBy = rec.createdBy; nr.createdAt = rec.createdAt; nr.updatedBy = who; nr.updatedAt = t;
+      });
+      data.rows.splice(modalIndex, 1, rec, ...extras);
     }
     renderData();
   }
