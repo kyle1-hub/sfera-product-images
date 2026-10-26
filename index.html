@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026i" />
+<link rel="stylesheet" href="srm.css?v=20261026j" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -95,6 +95,21 @@
     </div>
   </div>
 </div>
+<div class="ctx-menu" id="ctxMenu" hidden>
+  <button type="button" data-act="filter">筛选</button>
+  <button type="button" data-act="colfilter">列筛选</button>
+  <button type="button" data-act="clear">取消筛选</button>
+  <button type="button" data-act="export">导出</button>
+</div>
+<div class="col-filter" id="colFilter" hidden>
+  <div class="hd">列筛选</div>
+  <input id="colFilterQ" placeholder="搜索" />
+  <div class="list" id="colFilterList"></div>
+  <div class="ft">
+    <button type="button" class="btn" id="colFilterOk">确定</button>
+    <button type="button" class="btn btn-plain" id="colFilterCancel">取消</button>
+  </div>
+</div>
 <div class="modal" id="dlg">
   <div class="box" style="width:min(420px,92vw)">
     <div class="hd"><span>提示</span><button type="button" class="x" id="dlgX">×</button></div>
@@ -108,8 +123,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026i"></script>
-<script src="grid.js?v=20261026i"></script>
+<script src="crypto-lib.js?v=20261026j"></script>
+<script src="grid.js?v=20261026j"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -202,11 +217,27 @@ function distinctOptions(col) {
 function isDropdownCol(col) {
   return DROPDOWN_LABELS.includes(col.label);
 }
+let ctxInfo = null;
+let colFilterSel = new Set();
+function currentViewCols() {
+  if (view === "pack") return packCols();
+  if (view === "users") return USER_COLS;
+  return showCols();
+}
+function currentViewRows() {
+  if (view === "pack") return scopedPackRows();
+  if (view === "users") return users.users || [];
+  return scopedRows();
+}
 function matchFilters(row, cols) {
   return cols.every(col => {
+    const v = valOf(row, col.key);
+    const picked = filters["__in_" + col.key];
+    if (Array.isArray(picked) && picked.length) {
+      if (!picked.includes(v)) return false;
+    }
     const q = (filters[col.key] || "").trim();
     if (!q) return true;
-    const v = valOf(row, col.key);
     if (isDropdownCol(col)) return v === q;
     return v.toLowerCase().includes(q.toLowerCase());
   });
@@ -371,6 +402,7 @@ function renderQuery() {
     renderQuery();
   });
   fillPager("qpager", rows.length);
+  bindTableContext("#panelQuery table", showCols());
 }
 function renderPack() {
   const cols = packCols();
@@ -402,7 +434,128 @@ function renderPack() {
     renderPack();
   });
   fillPager("ppager", rows.length);
+  bindTableContext("#panelPack table", packCols());
 }
+
+function hideCtx() {
+  document.getElementById("ctxMenu").hidden = true;
+  document.getElementById("colFilter").hidden = true;
+}
+function bindTableContext(sel, cols) {
+  const table = document.querySelector(sel);
+  if (!table) return;
+  table.oncontextmenu = (e) => {
+    const td = e.target.closest("td,th");
+    if (!td) return;
+    e.preventDefault();
+    const cell = td.closest("td");
+    const th = td.closest("th");
+    const tr = td.closest("tr");
+    let colIndex = -1;
+    if (cell) colIndex = [...tr.children].indexOf(cell);
+    else if (th) colIndex = [...th.parentNode.children].indexOf(th);
+    const hasOps = !!table.querySelector("th[data-lock]");
+    const dataIndex = hasOps ? colIndex - 1 : colIndex;
+    const col = dataIndex >= 0 ? cols[dataIndex] : null;
+    const value = cell ? cell.getAttribute("title") || cell.textContent : "";
+    ctxInfo = { col, value, x: e.clientX, y: e.clientY };
+    const menu = document.getElementById("ctxMenu");
+    menu.hidden = false;
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 140) + "px";
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 160) + "px";
+    document.getElementById("colFilter").hidden = true;
+  };
+}
+function refreshCurrentView() {
+  page = 1;
+  renderFilters();
+  if (view === "query") renderQuery();
+  else if (view === "users") renderUsers();
+  else if (view === "pack") renderPack();
+  else renderData();
+}
+function csvEscape(v) {
+  const s = String(v ?? "");
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function exportCurrentRows() {
+  const cols = currentViewCols();
+  const rows = view === "pack" ? filteredPackList() : view === "users" ? filteredUsers() : filteredDataRows();
+  const header = cols.map(c => csvEscape(c.label)).join(",");
+  const body = rows.map(r => cols.map(c => csvEscape(r[c.key])).join(",")).join("\n");
+  const blob = new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (view === "pack" ? "装箱明细" : view === "users" ? "账号" : "数据查询") + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function openColFilter() {
+  if (!ctxInfo || !ctxInfo.col) return;
+  const col = ctxInfo.col;
+  const rows = currentViewRows();
+  const all = [...new Set(rows.map(r => valOf(r, col.key)).filter(v => String(v).trim() !== ""))].sort((a, b) => a.localeCompare(b, "zh"));
+  const prev = filters["__in_" + col.key];
+  colFilterSel = new Set(Array.isArray(prev) && prev.length ? prev : all);
+  const box = document.getElementById("colFilter");
+  const list = document.getElementById("colFilterList");
+  const q = document.getElementById("colFilterQ");
+  q.value = "";
+  const draw = () => {
+    const kw = q.value.trim().toLowerCase();
+    list.innerHTML = all.filter(v => !kw || v.toLowerCase().includes(kw)).map(v =>
+      `<label><input type="checkbox" value="${esc(v)}" ${colFilterSel.has(v) ? "checked" : ""}/>${esc(v)}</label>`
+    ).join("");
+    list.querySelectorAll("input").forEach(inp => {
+      inp.onchange = () => {
+        if (inp.checked) colFilterSel.add(inp.value);
+        else colFilterSel.delete(inp.value);
+      };
+    });
+  };
+  q.oninput = draw;
+  draw();
+  box.hidden = false;
+  box.style.left = Math.min(ctxInfo.x, window.innerWidth - 260) + "px";
+  box.style.top = Math.min(ctxInfo.y, window.innerHeight - 320) + "px";
+}
+document.getElementById("ctxMenu").onclick = (e) => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  if (act === "filter") {
+    if (ctxInfo && ctxInfo.col) {
+      filters[ctxInfo.col.key] = ctxInfo.value || "";
+      delete filters["__in_" + ctxInfo.col.key];
+      refreshCurrentView();
+    }
+    hideCtx();
+  } else if (act === "colfilter") {
+    document.getElementById("ctxMenu").hidden = true;
+    openColFilter();
+  } else if (act === "clear") {
+    if (ctxInfo && ctxInfo.col) {
+      delete filters[ctxInfo.col.key];
+      delete filters["__in_" + ctxInfo.col.key];
+    } else filters = {};
+    refreshCurrentView();
+    hideCtx();
+  } else if (act === "export") {
+    exportCurrentRows();
+    hideCtx();
+  }
+};
+document.getElementById("colFilterOk").onclick = () => {
+  if (ctxInfo && ctxInfo.col) {
+    filters["__in_" + ctxInfo.col.key] = [...colFilterSel];
+    refreshCurrentView();
+  }
+  hideCtx();
+};
+document.getElementById("colFilterCancel").onclick = hideCtx;
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#ctxMenu") && !e.target.closest("#colFilter")) hideCtx();
+});
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[ch])); }
@@ -446,8 +599,34 @@ function syncAuditKeys(r) {
     if (c.label === "修改时间") r[c.key] = r.updatedAt;
   });
 }
+function splitExistingSupplierRows() {
+  const key = fieldByLabel("供应商");
+  if (!key) return;
+  const next = [];
+  (data.rows || []).forEach(r => {
+    const parts = splitSuppliers(r[key]);
+    if (parts.length <= 1) {
+      if (parts[0]) {
+        r[key] = parts[0];
+        const code = supplierCodeOf(parts[0]);
+        if (code) r.viewers = code.toLowerCase();
+      }
+      next.push(r);
+      return;
+    }
+    parts.forEach((part, i) => {
+      const nr = { ...r, id: (r.id || uid()) + "-s" + (i + 1) };
+      nr[key] = part;
+      const code = supplierCodeOf(part);
+      nr.viewers = code ? code.toLowerCase() : r.viewers;
+      next.push(nr);
+    });
+  });
+  data.rows = next;
+}
 function fillAuditFields() {
   ensureAuditCols();
+  splitExistingSupplierRows();
   const who = operatorName();
   const t = "2026-10-23 12:00:00";
   (data.rows || []).forEach(r => {
@@ -457,6 +636,9 @@ function fillAuditFields() {
     if (!String(r.updatedBy || "").trim() || r.updatedBy === "系统") r.updatedBy = r.createdBy || who;
     if (!String(r.updatedAt || "").trim()) r.updatedAt = r.createdAt || t;
     syncAuditKeys(r);
+  });
+  (packing.rows || []).forEach(r => {
+    if (r.country != null) r.country = formatCountry(r.country);
   });
 }
 function fillUserAudit() {
@@ -612,6 +794,7 @@ function renderUsers() {
   bindOps();
   enableResize(table, userWidths);
   fillPager("userPager", list.length);
+  bindTableContext("#panelUsers table", USER_COLS);
 }
 function renderData() {
   const cols = showCols();
@@ -645,6 +828,7 @@ function renderData() {
     renderData();
   });
   fillPager("pager", rows.length);
+  bindTableContext("#panelData table", showCols());
 }
 function bindOps() {
   document.querySelectorAll(".icon-btn").forEach(btn => {
