@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026u" />
+<link rel="stylesheet" href="srm.css?v=20261026v" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026u"></script>
-<script src="grid.js?v=20261026u"></script>
+<script src="crypto-lib.js?v=20261026v"></script>
+<script src="grid.js?v=20261026v"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -200,7 +200,7 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型"];
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "品牌"];
 let packSelected = new Set();
 function sourceRowsForFilters() {
   if (view === "pack") return scopedPackRows();
@@ -257,7 +257,7 @@ function filteredRows() {
 }
 function filterCols() {
   if (view === "pack") {
-    const allow = ["发票号", "PO", "HO", "数量类型", "供应商", "国家"];
+    const allow = ["发票号", "PO", "HO", "数量类型", "品牌", "供应商", "国家"];
     return packCols().filter(c => allow.includes(c.label));
   }
   return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
@@ -436,11 +436,9 @@ function renderPack() {
     document.getElementById("pbody").innerHTML = slice.map((row, i) => {
       const n = start + i + 1;
       const id = row.id || ("idx-" + n);
-      const official = isOfficialQty(row);
       const checked = packSelected.has(id) ? "checked" : "";
-      const dis = official ? "" : "disabled";
       return "<tr>" +
-        `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(id)}" ${checked} ${dis} /></td>` +
+        `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(id)}" ${checked} /></td>` +
         `<td class="num">${n}</td>` +
         cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") +
         "</tr>";
@@ -467,9 +465,8 @@ function renderPack() {
   const all = document.getElementById("packCheckAll");
   if (all) {
     all.onchange = () => {
-      const official = rows.filter(isOfficialQty);
-      if (all.checked) official.forEach(r => packSelected.add(r.id));
-      else official.forEach(r => packSelected.delete(r.id));
+      if (all.checked) rows.forEach(r => packSelected.add(r.id));
+      else rows.forEach(r => packSelected.delete(r.id));
       renderPack();
     };
     syncPackCheckAll(rows);
@@ -481,10 +478,10 @@ function renderPack() {
 function syncPackCheckAll(rows) {
   const all = document.getElementById("packCheckAll");
   if (!all) return;
-  const official = (rows || filteredPackList()).filter(isOfficialQty);
-  const n = official.filter(r => packSelected.has(r.id)).length;
-  all.checked = official.length > 0 && n === official.length;
-  all.indeterminate = n > 0 && n < official.length;
+  const list = rows || filteredPackList();
+  const n = list.filter(r => packSelected.has(r.id)).length;
+  all.checked = list.length > 0 && n === list.length;
+  all.indeterminate = n > 0 && n < list.length;
 }
 function numVal(v) {
   const s = String(v == null ? "" : v).trim();
@@ -551,12 +548,24 @@ async function exportPackLabels() {
     const startRow = 17;
     const lastData = startRow + picked.length - 1;
     const srcRow = ws.getRow(startRow);
+    const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E79" } };
+    const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+    const dataFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
+    const dataFont = { color: { argb: "FF000000" } };
+    for (let c = 2; c <= 24; c++) {
+      const cell = ws.getRow(16).getCell(c);
+      cell.fill = headerFill;
+      if (cell.font) cell.font = Object.assign({}, cell.font, headerFont);
+      else cell.font = headerFont;
+    }
     for (let r = startRow + 1; r <= Math.max(lastData, 22); r++) {
       for (let c = 2; c <= 24; c++) cloneCellStyle(srcRow.getCell(c), ws.getRow(r).getCell(c));
     }
-    const inv = picked.map(r => r.invoice).find(v => String(v || "").trim());
-    if (inv) ws.getCell("Q6").value = inv;
+    const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
+    ws.getCell("Q6").value = inv;
     if (countries[0]) ws.getCell("Q8").value = countries[0];
+    const brands = [...new Set(picked.map(r => String(r.brand || "").trim()).filter(Boolean))];
+    if (brands[0]) ws.getCell("Q9").value = brands[0];
     const cols = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R"];
     picked.forEach((row, i) => {
       const r = startRow + i;
@@ -581,19 +590,24 @@ async function exportPackLabels() {
         const cell = ws.getCell(col + r);
         const v = vals[col];
         cell.value = v === "" ? null : v;
+        cell.font = dataFont;
+        cell.fill = dataFill;
       });
     });
     for (let r = lastData + 1; r <= 30; r++) {
       cols.forEach(col => { ws.getCell(col + r).value = null; });
     }
-    const end = Math.max(lastData, startRow);
-    ["B31", "E31", "I31", "J31", "K31"].forEach(addr => {
-      const cell = ws.getCell(addr);
-      const f = String(cell.value && cell.value.formula ? cell.value.formula : cell.value || "");
-      if (/17:.*22/.test(f)) {
-        cell.value = { formula: f.replace(/17:([A-Z]*)22/g, "17:$1" + end) };
-      }
-    });
+    const sumRange = (col) => ({ formula: "SUM(" + col + startRow + ":" + col + lastData + ")" });
+    ws.getCell("E31").value = sumRange("E");
+    ws.getCell("I31").value = sumRange("I");
+    ws.getCell("J31").value = sumRange("J");
+    ws.getCell("K31").value = sumRange("K");
+    ws.getCell("R31").value = sumRange("R");
+    ws.getCell("O35").value = { formula: "E31" };
+    ws.getCell("O36").value = { formula: "R31" };
+    ws.getCell("O37").value = { formula: "I31" };
+    ws.getCell("O38").value = { formula: "J31" };
+    ws.getCell("O39").value = { formula: "K31" };
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
