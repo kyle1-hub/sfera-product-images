@@ -114,8 +114,8 @@ body {
 }
 .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
 .item { display: flex; align-items: center; }
-.item { width: 240px; }
-.item label { width: 64px; flex: 0 0 64px; text-align: right; margin-right: 8px; color: #1a202c; font-weight: 700; white-space: nowrap; }
+.item { width: 340px; }
+.item label { width: 148px; flex: 0 0 148px; text-align: right; margin-right: 8px; color: #1a202c; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .user { font-weight: 700; opacity: 1; }
 .item input, .item select {
   height: 30px; border: 1px solid var(--srm-border); border-radius: 2px;
@@ -140,8 +140,9 @@ body {
   border-bottom: 2px solid transparent; font-size: 13px;
 }
 .tabs .on { color: var(--srm-green); border-bottom-color: var(--srm-green); font-weight: 600; }
-.table-wrap { overflow: auto; max-height: calc(100vh - 360px); max-width: 100%; }
-.table-card .pager { background: #fff; position: relative; z-index: 2; }
+.table-card { display: flex; flex-direction: column; min-height: 0; }
+.table-wrap { overflow: auto; max-height: calc(100vh - 430px); max-width: 100%; }
+.table-card .pager { background: #fff; position: relative; z-index: 2; flex-shrink: 0; }
 table { width: max-content; border-collapse: collapse; table-layout: fixed; }
 th {
   background: var(--srm-head); color: var(--srm-title); font-weight: 600;
