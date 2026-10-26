@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026hist" />
+<link rel="stylesheet" href="srm.css?v=20261026search" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026hist"></script>
-<script src="grid.js?v=20261026hist"></script>
+<script src="crypto-lib.js?v=20261026search"></script>
+<script src="grid.js?v=20261026search"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -251,7 +251,6 @@ function matchFilters(row, cols) {
     const q = (filters[col.key] || "").trim();
     if (!q) return true;
     if (q === BLANK) return isBlankValue(v);
-    if (isDropdownCol(col)) return v === q;
     return v.toLowerCase().includes(q.toLowerCase());
   });
 }
@@ -286,12 +285,10 @@ function filterControl(col) {
   const val = filters[col.key] || "";
   if (isDropdownCol(col)) {
     const opts = distinctOptions(col);
+    const listId = "opt_" + col.key;
     return `<div class="item"><label>${esc(col.label)}</label>
-      <select data-key="${col.key}">
-        <option value="">请选择</option>
-        <option value="${BLANK}" ${val === BLANK ? "selected" : ""}>${esc(BLANK_LABEL)}</option>
-        ${opts.map(o => `<option value="${esc(o)}" ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}
-      </select>
+      <input data-key="${col.key}" list="${listId}" placeholder="输入搜索" value="${esc(val)}" />
+      <datalist id="${listId}">${opts.map(o => `<option value="${esc(o)}"></option>`).join("")}</datalist>
     </div>`;
   }
   return `<div class="item"><label>${esc(col.label)}</label>
