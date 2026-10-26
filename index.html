@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026c" />
+<link rel="stylesheet" href="srm.css?v=20261026d" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -24,6 +24,7 @@
     <nav class="menu">
       <a href="javascript:void(0)" id="navUsers">账号管控</a>
       <a href="javascript:void(0)" id="navData">业务数据</a>
+      <a href="javascript:void(0)" id="navPack">装箱明细</a>
       <a href="javascript:void(0)" class="active" id="navQuery">数据查询</a>
     </nav>
   </aside>
@@ -58,6 +59,17 @@
           </table>
         </div>
         <div class="pager" id="pager"></div>
+      </div>
+      <div class="card table-card" id="panelPack" style="display:none">
+        <div class="tabs"><span class="on">装箱明细</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="phead"></thead>
+            <tbody id="pbody"></tbody>
+          </table>
+          <div class="empty" id="pempty" hidden>暂无数据</div>
+        </div>
+        <div class="pager" id="ppager"></div>
       </div>
       <div class="card table-card" id="panelQuery" style="display:none">
         <div class="tabs"><span class="on">查询结果</span></div>
@@ -96,12 +108,14 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026c"></script>
-<script src="grid.js?v=20261026c"></script>
+<script src="crypto-lib.js?v=20261026d"></script>
+<script src="grid.js?v=20261026d"></script>
 <script>
 let data = { columns: [], rows: [] };
+let packing = { columns: [], rows: [] };
 let users = { users: [] };
 let dataWidths = [];
+let packWidths = [];
 const USER_COLS = [
   { key: "name", label: "供应商" },
   { key: "username", label: "用户名" },
@@ -163,16 +177,32 @@ function scopedRows() {
   if (currentUser.isAdmin) return data.rows;
   return data.rows.filter(r => rowVisibleTo(r, currentUser.username, data.columns));
 }
+function packCols() {
+  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户");
+}
+function scopedPackRows() {
+  if (currentUser.isAdmin) return packing.rows || [];
+  return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
+}
+function matchFilters(row, cols) {
+  return cols.every(col => {
+    const q = (filters[col.key] || "").trim().toLowerCase();
+    if (!q) return true;
+    return valOf(row, col.key).toLowerCase().includes(q);
+  });
+}
+function filteredDataRows() {
+  return scopedRows().filter(row => matchFilters(row, showCols()));
+}
+function filteredPackList() {
+  return scopedPackRows().filter(row => matchFilters(row, packCols()));
+}
 function filteredRows() {
-  return scopedRows().filter(row =>
-    showCols().every(col => {
-      const q = (filters[col.key] || "").trim().toLowerCase();
-      if (!q) return true;
-      return valOf(row, col.key).toLowerCase().includes(q);
-    })
-  );
+  if (view === "pack") return filteredPackList();
+  return filteredDataRows();
 }
 function filterCols() {
+  if (view === "pack") return packCols();
   return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
 }
 function filteredUsers() {
@@ -225,6 +255,7 @@ function renderFilters() {
     renderFilters();
     if (view === "query") renderQuery();
     else if (view === "users") renderUsers();
+    else if (view === "pack") renderPack();
     else renderData();
   };
   document.getElementById("btnReload2").onclick = () => {
@@ -239,6 +270,7 @@ function runQuery() {
   page = 1;
   if (view === "query") renderQuery();
   else if (view === "users") renderUsers();
+  else if (view === "pack") renderPack();
   else renderData();
 }
 function fillPager(elId, total) {
@@ -266,6 +298,7 @@ function fillPager(elId, total) {
     page = 1;
     if (view === "users") renderUsers();
     else if (view === "query") renderQuery();
+    else if (view === "pack") renderPack();
     else renderData();
   };
   el.querySelectorAll(".pg").forEach(btn => {
@@ -276,6 +309,7 @@ function fillPager(elId, total) {
       else if (btn.dataset.n) page = Number(btn.dataset.n);
       if (view === "users") renderUsers();
       else if (view === "query") renderQuery();
+      else if (view === "pack") renderPack();
       else renderData();
     };
   });
@@ -288,7 +322,7 @@ function renderQuery() {
   }
   applyColgroup(table, queryWidths);
   document.getElementById("qhead").innerHTML = "<tr>" + cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
-  const rows = filteredRows();
+  const rows = filteredDataRows();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
   const start = (page - 1) * pageSize;
@@ -313,6 +347,37 @@ function renderQuery() {
     renderQuery();
   });
   fillPager("qpager", rows.length);
+}
+function renderPack() {
+  const cols = packCols();
+  const table = document.querySelector("#panelPack table");
+  if (!packWidths.length || packWidths.length !== cols.length) {
+    packWidths = cols.map(c => defaultWidth(c.label));
+  }
+  applyColgroup(table, packWidths);
+  document.getElementById("phead").innerHTML = "<tr>" + cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+  const rows = filteredPackList();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (page > pages) page = pages;
+  const start = (page - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+  const empty = document.getElementById("pempty");
+  if (!rows.length) {
+    document.getElementById("pbody").innerHTML = "";
+    empty.hidden = false;
+  } else {
+    empty.hidden = true;
+    document.getElementById("pbody").innerHTML = slice.map(row =>
+      "<tr>" + cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") + "</tr>"
+    ).join("");
+  }
+  enableResize(table, packWidths);
+  enableReorder(table, (from, to) => {
+    packing.columns = moveItem(packCols(), from, to);
+    packWidths = moveItem(packWidths, from, to);
+    renderPack();
+  });
+  fillPager("ppager", rows.length);
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -405,26 +470,34 @@ function isDuplicate(row, skipIndex) {
   return data.rows.some((r, i) => i !== skipIndex && dupKey(r) === key);
 }
 function setView(name) {
-  if (!currentUser.isAdmin && name !== "query") name = "query";
+  if (!currentUser.isAdmin && name !== "query" && name !== "pack") name = "query";
   view = name;
   page = 1;
   document.getElementById("navUsers").classList.toggle("active", name === "users");
   document.getElementById("navData").classList.toggle("active", name === "data");
+  document.getElementById("navPack").classList.toggle("active", name === "pack");
   document.getElementById("navQuery").classList.toggle("active", name === "query");
   document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
   document.getElementById("panelData").style.display = name === "data" ? "block" : "none";
+  document.getElementById("panelPack").style.display = name === "pack" ? "block" : "none";
   document.getElementById("panelQuery").style.display = name === "query" ? "block" : "none";
-  document.getElementById("crumb").textContent = name === "users" ? "维护 / 账号管控" : name === "data" ? "维护 / 业务数据" : "查询 / 数据查询";
+  document.getElementById("crumb").textContent =
+    name === "users" ? "维护 / 账号管控" :
+    name === "data" ? "维护 / 业务数据" :
+    name === "pack" ? "查询 / 装箱明细" : "查询 / 数据查询";
   renderFilters();
   renderToolbar();
   if (name === "query") renderQuery();
   if (name === "data") renderData();
   if (name === "users") renderUsers();
+  if (name === "pack") renderPack();
 }
 function renderToolbar() {
   const bar = document.getElementById("toolbar");
   if (view === "users") {
     bar.innerHTML = `<button class="btn btn-blue" id="addUser">新增账号</button>`;
+  } else if (view === "pack") {
+    bar.innerHTML = "";
   } else {
     bar.innerHTML = `<button class="btn btn-blue" id="addRow">新增</button>`;
   }
@@ -439,10 +512,11 @@ async function persistAll() {
   fillAuditFields();
   localStorage.setItem("invoice.data", JSON.stringify(data));
   localStorage.setItem("invoice.users", JSON.stringify(users));
+  localStorage.setItem("invoice.packing", JSON.stringify(packing));
   const list = users.users.filter(u => u.username && u.password);
   if (!list.length) return;
   try {
-    const vault = await buildVault(data.columns, data.rows, list);
+    const vault = await buildVault(data.columns, data.rows, list, packing);
     localStorage.setItem("invoice.vault", JSON.stringify(vault));
   } catch (e) {
     console.error(e);
@@ -489,7 +563,7 @@ function renderData() {
   applyColgroup(table, dataWidths);
   document.getElementById("thead").innerHTML = "<tr><th data-lock=\"1\">操作</th>" +
     cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
-  const rows = filteredRows();
+  const rows = filteredDataRows();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
   const start = (page - 1) * pageSize;
@@ -641,6 +715,7 @@ function download(name, obj) {
 }
 document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setView("users"); };
 document.getElementById("navData").onclick = (e) => { e.preventDefault(); setView("data"); };
+document.getElementById("navPack").onclick = (e) => { e.preventDefault(); setView("pack"); };
 document.getElementById("navQuery").onclick = (e) => { e.preventDefault(); setView("query"); };
 function reloadView() {
   try {
@@ -651,11 +726,18 @@ function reloadView() {
     const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
     if (savedUsers && savedUsers.users) users = normalizeUsers(savedUsers);
   } catch (e) {}
+  try {
+    const savedPack = JSON.parse(localStorage.getItem("invoice.packing") || "null");
+    if (savedPack && savedPack.rows) packing = savedPack;
+  } catch (e) {}
+  if (!packing.columns) packing.columns = [];
+  if (!packing.rows) packing.rows = [];
   fillUserAudit();
   fillAuditFields();
   page = 1;
   renderUsers();
   renderData();
+  renderPack();
   renderQuery();
   renderFilters();
   show("已刷新");
@@ -675,6 +757,7 @@ function afterLogin() {
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navData").style.display = currentUser.isAdmin ? "" : "none";
+  document.getElementById("navPack").style.display = "";
   document.getElementById("navQuery").style.display = "";
   setView("query");
   touchSession();
@@ -726,6 +809,8 @@ async function tryLogin(fromSaved) {
     };
     data.columns = payload.columns || data.columns;
     data.rows = payload.rows || [];
+    packing.columns = payload.packingColumns || packing.columns || [];
+    packing.rows = payload.packingRows || packing.rows || [];
     if (payload.users) users = { users: payload.users };
     fillUserAudit();
     fillAuditFields();

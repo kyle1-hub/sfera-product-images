@@ -14,6 +14,17 @@ const COL_W = {
   创建时间: 150,
   修改人: 88,
   修改时间: 150,
+  "Quantity Cartons": 120,
+  "Carton size (cm) (LxWxH)": 170,
+  CBM: 80,
+  Gross: 80,
+  Net: 80,
+  "Supplier Code": 120,
+  "EAN Code": 130,
+  CE: 70,
+  Description: 260,
+  "Quantity (Pieces per Carton)": 160,
+  "Total Quantity Pieces": 150,
 };
 function defaultWidth(label) {
   if (COL_W[label]) return COL_W[label];

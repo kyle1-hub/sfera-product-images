@@ -76,21 +76,26 @@ function rowVisibleTo(row, username, columns) {
   return extra.includes(uname);
 }
 
-async function buildVault(columns, rows, users) {
+async function buildVault(columns, rows, users, packing) {
   const list = users.filter(u => u.username && u.password);
   const vaultUsers = [];
   const viewCols = (columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户");
+  const packCols = ((packing && packing.columns) || []).filter(c => c.key !== "viewers" && c.label !== "可见用户");
+  const packRows = (packing && packing.rows) || [];
   for (const u of list) {
     const uname = String(u.username).trim().toUpperCase();
     const pwd = String(u.password).trim().toUpperCase();
     const isAdmin = uname === "ADMIN";
     const mine = isAdmin ? rows : rows.filter(r => rowVisibleTo(r, uname, columns));
+    const minePack = isAdmin ? packRows : packRows.filter(r => rowVisibleTo(r, uname, packCols));
     const payload = {
       username: uname,
       name: u.name || uname,
       isAdmin,
       columns: viewCols,
       rows: mine.map(({ viewers, ...rest }) => rest),
+      packingColumns: packCols,
+      packingRows: minePack.map(({ viewers, ...rest }) => rest),
     };
     if (isAdmin) {
       payload.users = list.map(x => {
