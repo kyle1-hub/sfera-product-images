@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026p" />
+<link rel="stylesheet" href="srm.css?v=20261026q" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -123,8 +123,9 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026p"></script>
-<script src="grid.js?v=20261026p"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="crypto-lib.js?v=20261026q"></script>
+<script src="grid.js?v=20261026q"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -199,7 +200,8 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员"];
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型"];
+let packSelected = new Set();
 function sourceRowsForFilters() {
   if (view === "pack") return scopedPackRows();
   if (view === "users") return users.users || [];
@@ -254,7 +256,7 @@ function filteredRows() {
 }
 function filterCols() {
   if (view === "pack") {
-    const allow = ["发票号", "发货单号记录", "PO", "HO", "供应商", "国家"];
+    const allow = ["发票号", "发货单号记录", "PO", "HO", "数量类型", "供应商", "国家"];
     return packCols().filter(c => allow.includes(c.label));
   }
   return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
@@ -405,41 +407,141 @@ function renderQuery() {
   bindColFilterBtns(table, cols);
   bindTableContext("#panelQuery table", showCols());
 }
+function isOfficialQty(row) {
+  return String(row.qtyType || "").trim() === "正式";
+}
 function renderPack() {
   const cols = packCols();
   const table = document.querySelector("#panelPack table");
-  if (!packWidths.length || packWidths.length !== cols.length) {
-    packWidths = cols.map(c => defaultWidth(c.label));
+  if (!packWidths.length || packWidths.length !== cols.length + 2) {
+    packWidths = [36, 48, ...cols.map(c => defaultWidth(c.label))];
   }
   applyColgroup(table, packWidths);
-  document.getElementById("phead").innerHTML = "<tr>" + cols.map(c => thHtml(c)).join("") + "</tr>";
   const rows = filteredPackList();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
   const start = (page - 1) * pageSize;
   const slice = rows.slice(start, start + pageSize);
+  document.getElementById("phead").innerHTML = "<tr>" +
+    `<th data-lock="1"><input type="checkbox" class="chk" id="packCheckAll" /></th>` +
+    `<th data-lock="1">#</th>` +
+    cols.map(c => thHtml(c)).join("") + "</tr>";
   const empty = document.getElementById("pempty");
   if (!rows.length) {
     document.getElementById("pbody").innerHTML = "";
     empty.hidden = false;
   } else {
     empty.hidden = true;
-    document.getElementById("pbody").innerHTML = slice.map(row =>
-      "<tr>" + cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") + "</tr>"
-    ).join("");
+    document.getElementById("pbody").innerHTML = slice.map((row, i) => {
+      const n = start + i + 1;
+      const id = row.id || ("idx-" + n);
+      const official = isOfficialQty(row);
+      const checked = packSelected.has(id) ? "checked" : "";
+      const dis = official ? "" : "disabled";
+      return "<tr>" +
+        `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(id)}" ${checked} ${dis} /></td>` +
+        `<td class="num">${n}</td>` +
+        cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") +
+        "</tr>";
+    }).join("");
   }
   enableResize(table, packWidths);
   enableReorder(table, (from, to) => {
-    packing.columns = moveItem(packCols(), from, to);
+    if (from < 2 || to < 2) return;
+    packing.columns = moveItem(packCols(), from - 2, to - 2);
     packWidths = moveItem(packWidths, from, to);
     renderPack();
   });
   fillPager("ppager", rows.length);
   bindColFilterBtns(table, cols);
   bindTableContext("#panelPack table", packCols());
+  document.querySelectorAll(".pack-chk").forEach(chk => {
+    chk.onchange = () => {
+      const id = chk.dataset.id;
+      if (chk.checked) packSelected.add(id);
+      else packSelected.delete(id);
+      syncPackCheckAll(rows);
+    };
+  });
+  const all = document.getElementById("packCheckAll");
+  if (all) {
+    all.onchange = () => {
+      const official = rows.filter(isOfficialQty);
+      if (all.checked) official.forEach(r => packSelected.add(r.id));
+      else official.forEach(r => packSelected.delete(r.id));
+      renderPack();
+    };
+    syncPackCheckAll(rows);
+  }
   const t = packing.fetchedAt || "";
   const el = document.getElementById("packTime");
   if (el) el.textContent = t ? "数据更新时间：" + t : "";
+}
+function syncPackCheckAll(rows) {
+  const all = document.getElementById("packCheckAll");
+  if (!all) return;
+  const official = (rows || filteredPackList()).filter(isOfficialQty);
+  const n = official.filter(r => packSelected.has(r.id)).length;
+  all.checked = official.length > 0 && n === official.length;
+  all.indeterminate = n > 0 && n < official.length;
+}
+function numVal(v) {
+  const n = Number(String(v == null ? "" : v).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : v || "";
+}
+async function exportPackLabels() {
+  const list = filteredPackList();
+  const picked = [];
+  const bad = [];
+  list.forEach((row, i) => {
+    if (!packSelected.has(row.id)) return;
+    const n = i + 1;
+    if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
+    else picked.push(row);
+  });
+  if (bad.length) { ask(bad.join("；")); return; }
+  if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  try {
+    if (typeof ExcelJS === "undefined") throw new Error("导出组件未加载");
+    const res = await fetch("A71-label-template.xlsx?t=" + Date.now());
+    if (!res.ok) throw new Error("找不到箱贴模板");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet("Template") || wb.worksheets[0];
+    const startRow = 17;
+    if (picked.length > 1) {
+      ws.spliceRows(startRow + 1, 0, ...Array.from({ length: picked.length - 1 }, () => []));
+    }
+    const inv = picked.map(r => r.invoice).find(v => String(v || "").trim());
+    if (inv) ws.getCell("Q6").value = inv;
+    picked.forEach((row, i) => {
+      const r = startRow + i;
+      ws.getCell("D" + r).value = row.po || "";
+      ws.getCell("E" + r).value = numVal(row.qtp);
+      ws.getCell("F" + r).value = numVal(row.packlong);
+      ws.getCell("G" + r).value = numVal(row.packwidth);
+      ws.getCell("H" + r).value = numVal(row.packhigh);
+      ws.getCell("I" + r).value = numVal(row.cbm);
+      ws.getCell("J" + r).value = numVal(row.gross);
+      ws.getCell("K" + r).value = numVal(row.net);
+      ws.getCell("L" + r).value = row.supplierCode || "";
+      ws.getCell("M" + r).value = row.ho || "";
+      ws.getCell("N" + r).value = row.ean || "";
+      ws.getCell("O" + r).value = row.ce || "";
+      ws.getCell("P" + r).value = row.description || "";
+      ws.getCell("Q" + r).value = numVal(row.perCarton);
+      ws.getCell("R" + r).value = numVal(row.totalPcs);
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (inv || "A71") + "箱贴.xlsx";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    ask(e.message || "导出失败");
+  }
 }
 
 function thHtml(col, extra) {
@@ -479,8 +581,8 @@ function bindTableContext(sel, cols) {
     let colIndex = -1;
     if (cell) colIndex = [...tr.children].indexOf(cell);
     else if (th) colIndex = [...th.parentNode.children].indexOf(th);
-    const hasOps = !!table.querySelector("th[data-lock]");
-    const dataIndex = hasOps ? colIndex - 1 : colIndex;
+    const lockCount = [...table.querySelectorAll("thead th[data-lock]")].length;
+    const dataIndex = colIndex - lockCount;
     const col = dataIndex >= 0 ? cols[dataIndex] : null;
     const value = cell ? cell.getAttribute("title") || cell.textContent : "";
     ctxInfo = { col, value, x: e.clientX, y: e.clientY };
@@ -765,7 +867,9 @@ function renderToolbar() {
   if (view === "users") {
     bar.innerHTML = `<button class="btn btn-blue" id="addUser">新增账号</button>`;
   } else if (view === "pack") {
-    bar.innerHTML = "";
+    bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>`;
+    const btn = document.getElementById("btnExportPack");
+    if (btn) btn.onclick = exportPackLabels;
   } else {
     bar.innerHTML = `<button class="btn btn-blue" id="addRow">新增</button>`;
   }
