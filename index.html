@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026r" />
+<link rel="stylesheet" href="srm.css?v=20261026s" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -97,8 +97,8 @@
 </div>
 <div class="ctx-menu" id="ctxMenu" hidden>
   <button type="button" data-act="filter">筛选</button>
-  <button type="button" data-act="colfilter">列筛选</button>
   <button type="button" data-act="clear">取消筛选</button>
+  <button type="button" data-act="reload">刷新</button>
   <button type="button" data-act="export">导出</button>
 </div>
 <div class="col-filter" id="colFilter" hidden>
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026r"></script>
-<script src="grid.js?v=20261026r"></script>
+<script src="crypto-lib.js?v=20261026s"></script>
+<script src="grid.js?v=20261026s"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -221,6 +221,7 @@ function isDropdownCol(col) {
 }
 let ctxInfo = null;
 let colFilterSel = new Set();
+let headerFilterOn = false;
 function currentViewCols() {
   if (view === "pack") return packCols();
   if (view === "users") return USER_COLS;
@@ -546,7 +547,10 @@ async function exportPackLabels() {
 
 function thHtml(col, extra) {
   const on = Array.isArray(filters["__in_" + col.key]) && filters["__in_" + col.key].length;
-  return `<th ${extra || ""}><span class="th-label">${esc(col.label)}</span><button type="button" class="th-filter${on ? " on" : ""}" data-key="${col.key}" title="筛选">▾</button></th>`;
+  const tri = headerFilterOn
+    ? `<button type="button" class="th-filter${on ? " on" : ""}" data-key="${col.key}" title="筛选">▾</button>`
+    : "";
+  return `<th ${extra || ""}><span class="th-label">${esc(col.label)}</span>${tri}</th>`;
 }
 function bindColFilterBtns(table, cols) {
   if (!table) return;
@@ -659,14 +663,23 @@ function openColFilter() {
 document.getElementById("ctxMenu").onclick = (e) => {
   const act = e.target.dataset.act;
   if (!act) return;
-  if (act === "filter" || act === "colfilter") {
+  if (act === "filter") {
+    headerFilterOn = true;
     document.getElementById("ctxMenu").hidden = true;
+    refreshCurrentView();
     openColFilter();
   } else if (act === "clear") {
-    if (ctxInfo && ctxInfo.col) {
-      delete filters[ctxInfo.col.key];
-      delete filters["__in_" + ctxInfo.col.key];
-    } else filters = {};
+    headerFilterOn = false;
+    Object.keys(filters).forEach(k => {
+      if (k.startsWith("__in_")) delete filters[k];
+    });
+    refreshCurrentView();
+    hideCtx();
+  } else if (act === "reload") {
+    headerFilterOn = false;
+    filters = {};
+    packSelected = new Set();
+    page = 1;
     refreshCurrentView();
     hideCtx();
   } else if (act === "export") {
