@@ -182,16 +182,6 @@ tbody tr:hover td { background: #e6f6f3; }
 .pg.on { background: var(--srm-green); color: #fff; border-color: var(--srm-green); }
 .pg:disabled { color: #cbd5e0; cursor: not-allowed; }
 .empty { text-align: center; color: #a0aec0; padding: 48px 0; }
-html.booting .login-wrap { display: none; }
-html.booting .shell { display: none !important; }
-html.booting body::before {
-  content: "";
-  position: fixed; inset: 0;
-  background: var(--srm-bg);
-  z-index: 40;
-}
-html.need-login .login-wrap { display: grid; }
-html.need-login .shell { display: none !important; }
 .login-wrap { min-height: 100%; display: grid; place-items: center; background: var(--srm-bg); }
 .login-card {
   width: 380px; background: #fff; border-radius: 4px; overflow: hidden;

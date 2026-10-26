@@ -4,15 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026a" />
-<script>
-try {
-  var _s = JSON.parse(localStorage.getItem("invoice.session") || "null");
-  document.documentElement.className = (_s && _s.username) ? "booting" : "need-login";
-} catch (e) {
-  document.documentElement.className = "need-login";
-}
-</script>
+<link rel="stylesheet" href="srm.css?v=20261026b" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -104,8 +96,8 @@ try {
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026a"></script>
-<script src="grid.js?v=20261026a"></script>
+<script src="crypto-lib.js?v=20261026b"></script>
+<script src="grid.js?v=20261026b"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -635,7 +627,6 @@ function reloadView() {
   setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 1200);
 }
 function afterLogin() {
-  document.documentElement.className = "in-app";
   document.getElementById("loginBox").style.display = "none";
   document.getElementById("app").style.display = "grid";
   document.getElementById("who").innerHTML =
@@ -646,7 +637,6 @@ function afterLogin() {
   document.getElementById("btnOut").onclick = () => {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem("invoice.vault");
-    document.documentElement.className = "need-login";
     location.reload();
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
@@ -703,7 +693,6 @@ async function tryLogin(fromSaved) {
   } catch (e) {
     if (fromSaved) {
       localStorage.removeItem(SESSION_KEY);
-      document.documentElement.className = "need-login";
       document.getElementById("loginBox").style.display = "";
       document.getElementById("app").style.display = "none";
     }
@@ -715,18 +704,13 @@ document.getElementById("loginPass").addEventListener("keydown", e => { if (e.ke
 function restoreSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    if (!saved || !saved.username) {
-      document.documentElement.className = "need-login";
-      return;
-    }
-    document.documentElement.className = "booting";
-    document.getElementById("loginBox").style.display = "none";
+    if (!saved || !saved.username) return;
     document.getElementById("loginUser").value = saved.username;
     document.getElementById("loginPass").value = saved.password || "";
+    const err = document.getElementById("loginErr");
+    if (err) err.textContent = "正在进入…";
     tryLogin(true);
-  } catch (e) {
-    document.documentElement.className = "need-login";
-  }
+  } catch (e) {}
 }
 function normalizeUsers(u) {
   const list = (u && u.users) || [];
@@ -762,14 +746,7 @@ Promise.all([
   fillUserAudit();
   fillAuditFields();
   restoreSession();
-}).catch(() => {
-  document.documentElement.className = "need-login";
-});
-setTimeout(() => {
-  if (document.documentElement.className === "booting") {
-    document.documentElement.className = "need-login";
-  }
-}, 8000);
+}).catch(() => restoreSession());
 </script>
 </body>
 </html>
