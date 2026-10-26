@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026k" />
+<link rel="stylesheet" href="srm.css?v=20261026m" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -123,8 +123,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026k"></script>
-<script src="grid.js?v=20261026k"></script>
+<script src="crypto-lib.js?v=20261026m"></script>
+<script src="grid.js?v=20261026m"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -376,7 +376,7 @@ function renderQuery() {
     queryWidths = cols.map(c => defaultWidth(c.label));
   }
   applyColgroup(table, queryWidths);
-  document.getElementById("qhead").innerHTML = "<tr>" + cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+  document.getElementById("qhead").innerHTML = "<tr>" + cols.map(c => thHtml(c)).join("") + "</tr>";
   const rows = filteredDataRows();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
@@ -402,6 +402,7 @@ function renderQuery() {
     renderQuery();
   });
   fillPager("qpager", rows.length);
+  bindColFilterBtns(table, cols);
   bindTableContext("#panelQuery table", showCols());
 }
 function renderPack() {
@@ -411,7 +412,7 @@ function renderPack() {
     packWidths = cols.map(c => defaultWidth(c.label));
   }
   applyColgroup(table, packWidths);
-  document.getElementById("phead").innerHTML = "<tr>" + cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+  document.getElementById("phead").innerHTML = "<tr>" + cols.map(c => thHtml(c)).join("") + "</tr>";
   const rows = filteredPackList();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
@@ -434,12 +435,33 @@ function renderPack() {
     renderPack();
   });
   fillPager("ppager", rows.length);
+  bindColFilterBtns(table, cols);
   bindTableContext("#panelPack table", packCols());
   const t = packing.fetchedAt || "";
   const el = document.getElementById("packTime");
   if (el) el.textContent = t ? "数据更新时间：" + t : "";
 }
 
+function thHtml(col, extra) {
+  const on = Array.isArray(filters["__in_" + col.key]) && filters["__in_" + col.key].length;
+  return `<th ${extra || ""}><span class="th-label">${esc(col.label)}</span><button type="button" class="th-filter${on ? " on" : ""}" data-key="${col.key}" title="筛选">▾</button></th>`;
+}
+function bindColFilterBtns(table, cols) {
+  if (!table) return;
+  table.querySelectorAll(".th-filter").forEach(btn => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = btn.dataset.key;
+      const col = cols.find(c => c.key === key);
+      if (!col) return;
+      const rect = btn.getBoundingClientRect();
+      ctxInfo = { col, value: "", x: rect.left, y: rect.bottom + 4 };
+      document.getElementById("ctxMenu").hidden = true;
+      openColFilter();
+    };
+  });
+}
 function hideCtx() {
   document.getElementById("ctxMenu").hidden = true;
   document.getElementById("colFilter").hidden = true;
@@ -784,7 +806,7 @@ function renderUsers() {
   }
   applyColgroup(table, userWidths);
   document.getElementById("userHead").innerHTML = "<tr><th data-lock=\"1\">操作</th>" +
-    USER_COLS.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+    USER_COLS.map(c => thHtml(c)).join("") + "</tr>";
   const list = filteredUsers();
   const pages = Math.max(1, Math.ceil(list.length / pageSize));
   if (page > pages) page = pages;
@@ -799,6 +821,7 @@ function renderUsers() {
   bindOps();
   enableResize(table, userWidths);
   fillPager("userPager", list.length);
+  bindColFilterBtns(table, USER_COLS);
   bindTableContext("#panelUsers table", USER_COLS);
 }
 function renderData() {
@@ -809,7 +832,7 @@ function renderData() {
   }
   applyColgroup(table, dataWidths);
   document.getElementById("thead").innerHTML = "<tr><th data-lock=\"1\">操作</th>" +
-    cols.map(c => `<th><span class="th-label">${esc(c.label)}</span></th>`).join("") + "</tr>";
+    cols.map(c => thHtml(c)).join("") + "</tr>";
   const rows = filteredDataRows();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   if (page > pages) page = pages;
@@ -833,6 +856,7 @@ function renderData() {
     renderData();
   });
   fillPager("pager", rows.length);
+  bindColFilterBtns(table, cols);
   bindTableContext("#panelData table", showCols());
 }
 function bindOps() {

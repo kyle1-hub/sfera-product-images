@@ -150,7 +150,13 @@ th {
   position: sticky; top: 0; white-space: nowrap; z-index: 1;
   overflow: visible;
 }
-th .th-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; max-width: 100%; vertical-align: middle; }
+th .th-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 22px); vertical-align: middle; }
+.th-filter {
+  float: right; width: 18px; height: 18px; margin-left: 4px; padding: 0;
+  border: 1px solid transparent; background: transparent; color: #94a3b8;
+  cursor: pointer; font-size: 11px; line-height: 16px; border-radius: 2px;
+}
+.th-filter:hover, .th-filter.on { color: var(--srm-green); border-color: var(--srm-green); }
 th.dragging { opacity: .55; }
 th.drag-over { box-shadow: inset 2px 0 0 var(--srm-green); }
 .col-resizer {
@@ -224,4 +230,4 @@ td input, th input {
 .col-filter .list label { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-weight: 400; width: auto; flex: none; text-align: left; white-space: nowrap; }
 .col-filter .ft { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
 .col-filter .ft .btn { min-width: 72px; }
-.pack-time { margin-left: auto; padding: 10px 14px; font-size: 12px; color: #718096; font-weight: 400; }
+.pack-time { margin-left: auto; padding: 10px 14px; font-size: 12px; color: #dc2626; font-weight: 700; }

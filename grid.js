@@ -79,7 +79,7 @@ function enableReorder(table, onDrop) {
     if (th.dataset.lock === "1") return;
     th.draggable = true;
     th.addEventListener("dragstart", (e) => {
-      if (e.target.classList.contains("col-resizer")) { e.preventDefault(); return; }
+      if (e.target.classList.contains("col-resizer") || e.target.classList.contains("th-filter")) { e.preventDefault(); return; }
       th.classList.add("dragging");
       e.dataTransfer.setData("text/plain", String(i));
     });
