@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026q" />
+<link rel="stylesheet" href="srm.css?v=20261026r" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026q"></script>
-<script src="grid.js?v=20261026q"></script>
+<script src="crypto-lib.js?v=20261026r"></script>
+<script src="grid.js?v=20261026r"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -194,7 +194,7 @@ function scopedRows() {
   return data.rows.filter(r => rowVisibleTo(r, currentUser.username, data.columns));
 }
 function packCols() {
-  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户");
+  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录");
 }
 function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
@@ -256,7 +256,7 @@ function filteredRows() {
 }
 function filterCols() {
   if (view === "pack") {
-    const allow = ["发票号", "发货单号记录", "PO", "HO", "数量类型", "供应商", "国家"];
+    const allow = ["发票号", "PO", "HO", "数量类型", "供应商", "国家"];
     return packCols().filter(c => allow.includes(c.label));
   }
   return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
