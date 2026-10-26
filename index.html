@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026e" />
+<link rel="stylesheet" href="srm.css?v=20261026f" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -108,8 +108,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026d"></script>
-<script src="grid.js?v=20261026d"></script>
+<script src="crypto-lib.js?v=20261026f"></script>
+<script src="grid.js?v=20261026f"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -202,7 +202,10 @@ function filteredRows() {
   return filteredDataRows();
 }
 function filterCols() {
-  if (view === "pack") return packCols();
+  if (view === "pack") {
+    const allow = ["发票号", "PO", "HO", "供应商", "国家"];
+    return packCols().filter(c => allow.includes(c.label));
+  }
   return showCols().filter(c => !["createdBy", "createdAt", "updatedBy", "updatedAt"].includes(c.key));
 }
 function filteredUsers() {
