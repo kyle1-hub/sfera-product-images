@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026s" />
+<link rel="stylesheet" href="srm.css?v=20261026t" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -124,8 +124,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026s"></script>
-<script src="grid.js?v=20261026s"></script>
+<script src="crypto-lib.js?v=20261026t"></script>
+<script src="grid.js?v=20261026t"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -665,9 +665,8 @@ document.getElementById("ctxMenu").onclick = (e) => {
   if (!act) return;
   if (act === "filter") {
     headerFilterOn = true;
-    document.getElementById("ctxMenu").hidden = true;
     refreshCurrentView();
-    openColFilter();
+    hideCtx();
   } else if (act === "clear") {
     headerFilterOn = false;
     Object.keys(filters).forEach(k => {
