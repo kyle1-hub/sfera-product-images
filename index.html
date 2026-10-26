@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026z" />
+<link rel="stylesheet" href="srm.css?v=20261026hist" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -26,6 +26,7 @@
     <nav class="menu">
       <a href="javascript:void(0)" id="navUsers">账号管控</a>
       <a href="javascript:void(0)" class="active" id="navPack">装箱明细</a>
+      <a href="javascript:void(0)" id="navHistory">历史日志</a>
     </nav>
   </aside>
   <div class="main">
@@ -60,6 +61,17 @@
           <div class="empty" id="pempty" hidden>暂无数据</div>
         </div>
         <div class="pager" id="ppager"></div>
+      </div>
+      <div class="card table-card" id="panelHistory" style="display:none">
+        <div class="tabs"><span class="on">历史日志</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="hhead"></thead>
+            <tbody id="hbody"></tbody>
+          </table>
+          <div class="empty" id="hempty" hidden>暂无变更记录</div>
+        </div>
+        <div class="pager" id="hpager"></div>
       </div>
     </div>
   </div>
@@ -103,12 +115,26 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261026z"></script>
-<script src="grid.js?v=20261026z"></script>
+<script src="crypto-lib.js?v=20261026hist"></script>
+<script src="grid.js?v=20261026hist"></script>
 <script>
-let packing = { columns: [], rows: [] };
+let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
 let packWidths = [];
+let histWidths = [];
+const BLANK = "__BLANK__";
+const BLANK_LABEL = "<空白>";
+const HISTORY_COLS = [
+  { key: "at", label: "变更时间" },
+  { key: "action", label: "动作" },
+  { key: "invoice", label: "发票号" },
+  { key: "po", label: "PO" },
+  { key: "ho", label: "HO" },
+  { key: "supplier", label: "供应商" },
+  { key: "fieldLabel", label: "变更字段" },
+  { key: "oldValue", label: "原值" },
+  { key: "newValue", label: "新值" },
+];
 const USER_COLS = [
   { key: "name", label: "供应商" },
   { key: "username", label: "用户名" },
@@ -172,10 +198,16 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "品牌"];
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "品牌", "动作", "变更字段"];
 let packSelected = new Set();
+function scopedHistoryRows() {
+  const rows = packing.history || [];
+  if (currentUser.isAdmin) return rows;
+  return rows.filter(r => rowVisibleTo(r, currentUser.username, [{ key: "supplier", label: "供应商" }]));
+}
 function sourceRowsForFilters() {
   if (view === "users") return users.users || [];
+  if (view === "history") return scopedHistoryRows();
   return scopedPackRows();
 }
 function distinctOptions(col) {
@@ -195,21 +227,30 @@ let colFilterSel = new Set();
 let headerFilterOn = false;
 function currentViewCols() {
   if (view === "users") return USER_COLS;
+  if (view === "history") return HISTORY_COLS;
   return packCols();
 }
 function currentViewRows() {
   if (view === "users") return users.users || [];
+  if (view === "history") return scopedHistoryRows();
   return scopedPackRows();
+}
+function isBlankValue(v) {
+  return !String(v == null ? "" : v).trim();
+}
+function filterToken(v) {
+  return isBlankValue(v) ? BLANK : String(v);
 }
 function matchFilters(row, cols) {
   return cols.every(col => {
     const v = valOf(row, col.key);
     const picked = filters["__in_" + col.key];
     if (Array.isArray(picked) && picked.length) {
-      if (!picked.includes(v)) return false;
+      if (!picked.includes(filterToken(v))) return false;
     }
     const q = (filters[col.key] || "").trim();
     if (!q) return true;
+    if (q === BLANK) return isBlankValue(v);
     if (isDropdownCol(col)) return v === q;
     return v.toLowerCase().includes(q.toLowerCase());
   });
@@ -217,10 +258,18 @@ function matchFilters(row, cols) {
 function filteredPackList() {
   return scopedPackRows().filter(row => matchFilters(row, packCols()));
 }
+function filteredHistory() {
+  return scopedHistoryRows().filter(row => matchFilters(row, HISTORY_COLS));
+}
 function filteredRows() {
+  if (view === "history") return filteredHistory();
   return filteredPackList();
 }
 function filterCols() {
+  if (view === "history") {
+    const allow = ["发票号", "PO", "HO", "供应商", "动作", "变更字段"];
+    return HISTORY_COLS.filter(c => allow.includes(c.label));
+  }
   const allow = ["发票号", "PO", "HO", "数量类型", "品牌", "供应商", "国家"];
   return packCols().filter(c => allow.includes(c.label));
 }
@@ -240,6 +289,7 @@ function filterControl(col) {
     return `<div class="item"><label>${esc(col.label)}</label>
       <select data-key="${col.key}">
         <option value="">请选择</option>
+        <option value="${BLANK}" ${val === BLANK ? "selected" : ""}>${esc(BLANK_LABEL)}</option>
         ${opts.map(o => `<option value="${esc(o)}" ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}
       </select>
     </div>`;
@@ -273,8 +323,7 @@ function renderFilters() {
     filters = {};
     page = 1;
     renderFilters();
-    if (view === "users") renderUsers();
-    else renderPack();
+    refreshCurrentView();
   };
   document.getElementById("btnReload2").onclick = () => {
     if (typeof reloadView === "function") reloadView();
@@ -286,8 +335,7 @@ function runQuery() {
     filters[inp.dataset.key] = inp.value;
   });
   page = 1;
-  if (view === "users") renderUsers();
-  else renderPack();
+  refreshCurrentView();
 }
 function fillPager(elId, total) {
   const el = document.getElementById(elId);
@@ -312,8 +360,7 @@ function fillPager(elId, total) {
   el.querySelector(".pageSize").onchange = (e) => {
     pageSize = Number(e.target.value) || 100;
     page = 1;
-    if (view === "users") renderUsers();
-    else renderPack();
+    redrawCurrentView();
   };
   el.querySelectorAll(".pg").forEach(btn => {
     btn.onclick = () => {
@@ -321,8 +368,7 @@ function fillPager(elId, total) {
       if (btn.dataset.p === "prev") page = Math.max(1, page - 1);
       else if (btn.dataset.p === "next") page = Math.min(pages, page + 1);
       else if (btn.dataset.n) page = Number(btn.dataset.n);
-      if (view === "users") renderUsers();
-      else renderPack();
+      redrawCurrentView();
     };
   });
 }
@@ -591,11 +637,43 @@ function bindTableContext(sel, cols) {
     document.getElementById("colFilter").hidden = true;
   };
 }
+function redrawCurrentView() {
+  if (view === "users") renderUsers();
+  else if (view === "history") renderHistory();
+  else renderPack();
+}
 function refreshCurrentView() {
   page = 1;
   renderFilters();
-  if (view === "users") renderUsers();
-  else renderPack();
+  redrawCurrentView();
+}
+function renderHistory() {
+  const cols = HISTORY_COLS;
+  const table = document.querySelector("#panelHistory table");
+  if (!histWidths.length || histWidths.length !== cols.length) {
+    histWidths = cols.map(c => defaultWidth(c.label));
+  }
+  applyColgroup(table, histWidths);
+  const rows = filteredHistory();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (page > pages) page = pages;
+  const start = (page - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+  document.getElementById("hhead").innerHTML = "<tr>" + cols.map(c => thHtml(c)).join("") + "</tr>";
+  const empty = document.getElementById("hempty");
+  if (!rows.length) {
+    document.getElementById("hbody").innerHTML = "";
+    empty.hidden = false;
+  } else {
+    empty.hidden = true;
+    document.getElementById("hbody").innerHTML = slice.map(row =>
+      "<tr>" + cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") + "</tr>"
+    ).join("");
+  }
+  enableResize(table, histWidths);
+  fillPager("hpager", rows.length);
+  bindColFilterBtns(table, cols);
+  bindTableContext("#panelHistory table", HISTORY_COLS);
 }
 function csvEscape(v) {
   const s = String(v ?? "");
@@ -604,13 +682,13 @@ function csvEscape(v) {
 }
 function exportCurrentRows() {
   const cols = currentViewCols();
-  const rows = view === "users" ? filteredUsers() : filteredPackList();
+  const rows = view === "users" ? filteredUsers() : view === "history" ? filteredHistory() : filteredPackList();
   const header = cols.map(c => csvEscape(c.label)).join(",");
   const body = rows.map(r => cols.map(c => csvEscape(r[c.key])).join(",")).join("\n");
   const blob = new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (view === "users" ? "账号" : "装箱明细") + ".csv";
+  a.download = (view === "users" ? "账号" : view === "history" ? "历史日志" : "装箱明细") + ".csv";
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -618,7 +696,9 @@ function openColFilter() {
   if (!ctxInfo || !ctxInfo.col) return;
   const col = ctxInfo.col;
   const rows = currentViewRows();
-  const all = [...new Set(rows.map(r => valOf(r, col.key)).filter(v => String(v).trim() !== ""))].sort((a, b) => a.localeCompare(b, "zh"));
+  const hasBlank = rows.some(r => isBlankValue(valOf(r, col.key)));
+  const values = [...new Set(rows.map(r => valOf(r, col.key)).filter(v => String(v).trim() !== ""))].sort((a, b) => a.localeCompare(b, "zh"));
+  const all = hasBlank ? [BLANK, ...values] : values;
   const prev = filters["__in_" + col.key];
   colFilterSel = new Set(Array.isArray(prev) && prev.length ? prev : all);
   const box = document.getElementById("colFilter");
@@ -629,8 +709,11 @@ function openColFilter() {
   const syncAll = () => { allBox.checked = all.length > 0 && all.every(v => colFilterSel.has(v)); };
   const draw = () => {
     const kw = q.value.trim().toLowerCase();
-    list.innerHTML = all.filter(v => !kw || v.toLowerCase().includes(kw)).map(v =>
-      `<label><input type="checkbox" value="${esc(v)}" ${colFilterSel.has(v) ? "checked" : ""}/>${esc(v)}</label>`
+    list.innerHTML = all.filter(v => {
+      if (v === BLANK) return !kw || BLANK_LABEL.toLowerCase().includes(kw) || "空白".includes(kw);
+      return !kw || v.toLowerCase().includes(kw);
+    }).map(v =>
+      `<label><input type="checkbox" value="${esc(v)}" ${colFilterSel.has(v) ? "checked" : ""}/>${esc(v === BLANK ? BLANK_LABEL : v)}</label>`
     ).join("");
     list.querySelectorAll("input").forEach(inp => {
       inp.onchange = () => {
@@ -713,24 +796,30 @@ function nowText() {
 }
 function operatorName() { return String(currentUser.username || "").trim().toUpperCase() || "ADMIN"; }
 function setView(name) {
-  if (!currentUser.isAdmin && name !== "pack") name = "pack";
+  if (!currentUser.isAdmin && name !== "pack" && name !== "history") name = "pack";
   view = name;
   page = 1;
   document.getElementById("navUsers").classList.toggle("active", name === "users");
   document.getElementById("navPack").classList.toggle("active", name === "pack");
+  document.getElementById("navHistory").classList.toggle("active", name === "history");
   document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
   document.getElementById("panelPack").style.display = name === "pack" ? "block" : "none";
+  document.getElementById("panelHistory").style.display = name === "history" ? "block" : "none";
   document.getElementById("crumb").textContent =
-    name === "users" ? "维护 / 账号管控" : "查询 / 装箱明细";
+    name === "users" ? "维护 / 账号管控" :
+    name === "history" ? "查询 / 历史日志" : "查询 / 装箱明细";
   renderFilters();
   renderToolbar();
   if (name === "users") renderUsers();
   if (name === "pack") renderPack();
+  if (name === "history") renderHistory();
 }
 function renderToolbar() {
   const bar = document.getElementById("toolbar");
   if (view === "users") {
     bar.innerHTML = `<button class="btn btn-blue" id="addUser">新增账号</button>`;
+  } else if (view === "history") {
+    bar.innerHTML = "";
   } else {
     bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>`;
     const btn = document.getElementById("btnExportPack");
@@ -866,6 +955,7 @@ function download(name, obj) {
 }
 document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setView("users"); };
 document.getElementById("navPack").onclick = (e) => { e.preventDefault(); setView("pack"); };
+document.getElementById("navHistory").onclick = (e) => { e.preventDefault(); setView("history"); };
 function reloadView() {
   try {
     const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
@@ -879,9 +969,8 @@ function reloadView() {
   if (!packing.rows) packing.rows = [];
   fillUserAudit();
   page = 1;
-  if (view === "users") renderUsers();
-  else renderPack();
   renderFilters();
+  redrawCurrentView();
   show("已刷新");
   setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 1200);
 }
@@ -899,6 +988,7 @@ function afterLogin() {
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navPack").style.display = "";
+  document.getElementById("navHistory").style.display = "";
   setView("pack");
   touchSession();
   if (!idleBound) {
@@ -933,6 +1023,7 @@ async function tryLogin(fromSaved) {
     packing.columns = payload.packingColumns || packing.columns || [];
     packing.rows = payload.packingRows || packing.rows || [];
     packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
+    packing.history = payload.packingHistory || packing.history || [];
     if (payload.users) users = { users: payload.users };
     fillUserAudit();
     saveSession(username, password);

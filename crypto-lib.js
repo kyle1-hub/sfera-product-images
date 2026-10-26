@@ -81,11 +81,14 @@ async function buildVault(columns, rows, users, packing) {
   const vaultUsers = [];
   const packCols = ((packing && packing.columns) || []).filter(c => c.key !== "viewers" && c.label !== "可见用户");
   const packRows = (packing && packing.rows) || [];
+  const histCols = [{ key: "supplier", label: "供应商" }];
+  const histRows = (packing && packing.history) || [];
   for (const u of list) {
     const uname = String(u.username).trim().toUpperCase();
     const pwd = String(u.password).trim().toUpperCase();
     const isAdmin = uname === "ADMIN";
     const minePack = isAdmin ? packRows : packRows.filter(r => rowVisibleTo(r, uname, packCols));
+    const mineHist = isAdmin ? histRows : histRows.filter(r => rowVisibleTo(r, uname, histCols));
     const payload = {
       username: uname,
       name: u.name || uname,
@@ -95,6 +98,7 @@ async function buildVault(columns, rows, users, packing) {
       packingColumns: packCols,
       packingRows: minePack.map(({ viewers, ...rest }) => rest),
       packingFetchedAt: (packing && packing.fetchedAt) || "",
+      packingHistory: mineHist.map(({ viewers, ...rest }) => rest),
     };
     if (isAdmin) {
       payload.users = list.map(x => {
