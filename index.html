@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026b" />
+<link rel="stylesheet" href="srm.css?v=20261026c" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -96,8 +96,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026b"></script>
-<script src="grid.js?v=20261026b"></script>
+<script src="crypto-lib.js?v=20261026c"></script>
+<script src="grid.js?v=20261026c"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -116,7 +116,42 @@ let view = "query";
 let currentUser = { username: "", name: "", isAdmin: false };
 let queryWidths = [];
 const SESSION_KEY = "invoice.session";
+const IDLE_MS = 30 * 60 * 1000;
+let idleTimer = null;
+let idleBound = false;
 function isAdminUser(name) { return String(name || "").trim().toUpperCase() === "ADMIN"; }
+function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+function saveSession(username, password) {
+  const rec = { username, password: String(password || "").toUpperCase(), last: Date.now() };
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(rec)); } catch (e) {}
+}
+function readSession() {
+  let rec = null;
+  try { rec = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch (e) {}
+  if (!rec || !rec.username) return null;
+  if (rec.last && Date.now() - rec.last > IDLE_MS) {
+    clearSession();
+    return null;
+  }
+  return rec;
+}
+function touchSession() {
+  const rec = readSession();
+  if (!rec) return;
+  rec.last = Date.now();
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(rec)); } catch (e) {}
+  resetIdleTimer();
+}
+function resetIdleTimer() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    clearSession();
+    location.reload();
+  }, IDLE_MS);
+}
 let modalKind = "";
 let modalIndex = -1;
 let filters = {};
@@ -635,14 +670,20 @@ function afterLogin() {
     '　<button type="button" class="btn btn-text" id="btnOut">退出</button>';
   document.getElementById("btnReload").onclick = reloadView;
   document.getElementById("btnOut").onclick = () => {
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem("invoice.vault");
+    clearSession();
     location.reload();
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navData").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navQuery").style.display = "";
   setView("query");
+  touchSession();
+  if (!idleBound) {
+    idleBound = true;
+    ["click", "keydown", "mousemove", "scroll"].forEach(ev => {
+      document.addEventListener(ev, touchSession, { passive: true });
+    });
+  }
 }
 async function loadVaultFile() {
   try {
@@ -688,11 +729,11 @@ async function tryLogin(fromSaved) {
     if (payload.users) users = { users: payload.users };
     fillUserAudit();
     fillAuditFields();
-    if (!fromSaved) localStorage.setItem(SESSION_KEY, JSON.stringify({ username, password: password.toUpperCase() }));
+    saveSession(username, password);
     afterLogin();
   } catch (e) {
     if (fromSaved) {
-      localStorage.removeItem(SESSION_KEY);
+      clearSession();
       document.getElementById("loginBox").style.display = "";
       document.getElementById("app").style.display = "none";
     }
@@ -702,13 +743,12 @@ async function tryLogin(fromSaved) {
 document.getElementById("btnLogin").onclick = () => tryLogin(false);
 document.getElementById("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(false); });
 function restoreSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
   try {
-    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    const saved = readSession();
     if (!saved || !saved.username) return;
     document.getElementById("loginUser").value = saved.username;
     document.getElementById("loginPass").value = saved.password || "";
-    const err = document.getElementById("loginErr");
-    if (err) err.textContent = "正在进入…";
     tryLogin(true);
   } catch (e) {}
 }
