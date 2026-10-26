@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261023f" />
+<link rel="stylesheet" href="srm.css?v=20261026a" />
 <script>
 try {
   var _s = JSON.parse(localStorage.getItem("invoice.session") || "null");
@@ -104,8 +104,8 @@ try {
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261023f"></script>
-<script src="grid.js?v=20261023f"></script>
+<script src="crypto-lib.js?v=20261026a"></script>
+<script src="grid.js?v=20261026a"></script>
 <script>
 let data = { columns: [], rows: [] };
 let users = { users: [] };
@@ -637,7 +637,7 @@ function reloadView() {
 function afterLogin() {
   document.documentElement.className = "in-app";
   document.getElementById("loginBox").style.display = "none";
-  document.getElementById("app").style.display = "grid";}
+  document.getElementById("app").style.display = "grid";
   document.getElementById("who").innerHTML =
     (currentUser.name || currentUser.username) +
     '　<button type="button" class="btn btn-text" id="btnReload">刷新</button>' +
@@ -646,12 +646,13 @@ function afterLogin() {
   document.getElementById("btnOut").onclick = () => {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem("invoice.vault");
+    document.documentElement.className = "need-login";
     location.reload();
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navData").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navQuery").style.display = "";
-  setView(currentUser.isAdmin ? "query" : "query");
+  setView("query");
 }
 async function loadVaultFile() {
   try {
@@ -761,7 +762,14 @@ Promise.all([
   fillUserAudit();
   fillAuditFields();
   restoreSession();
+}).catch(() => {
+  document.documentElement.className = "need-login";
 });
+setTimeout(() => {
+  if (document.documentElement.className === "booting") {
+    document.documentElement.className = "need-login";
+  }
+}, 8000);
 </script>
 </body>
 </html>
