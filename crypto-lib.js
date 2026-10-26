@@ -96,6 +96,7 @@ async function buildVault(columns, rows, users, packing) {
       rows: mine.map(({ viewers, ...rest }) => rest),
       packingColumns: packCols,
       packingRows: minePack.map(({ viewers, ...rest }) => rest),
+      packingFetchedAt: (packing && packing.fetchedAt) || "",
     };
     if (isAdmin) {
       payload.users = list.map(x => {
@@ -125,7 +126,8 @@ async function unlockVault(vault, username, password) {
   const raw = String(password || "").trim();
   const hit = (vault.users || []).find(u => String(u.username).toUpperCase() === uname);
   if (!hit) throw new Error("账号不存在");
-  const tries = [...new Set([raw.toUpperCase(), raw, raw.toLowerCase(), uname].filter(Boolean))];
+  if (!raw) throw new Error("请输入密码");
+  const tries = [...new Set([raw, raw.toUpperCase(), raw.toLowerCase()].filter(Boolean))];
   for (const pwd of tries) {
     try {
       return await decryptJson(hit.pack, pwd);

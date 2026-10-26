@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261026j" />
+<link rel="stylesheet" href="srm.css?v=20261026k" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -61,7 +61,7 @@
         <div class="pager" id="pager"></div>
       </div>
       <div class="card table-card" id="panelPack" style="display:none">
-        <div class="tabs"><span class="on">装箱明细</span></div>
+        <div class="tabs"><span class="on">装箱明细</span><span class="pack-time" id="packTime"></span></div>
         <div class="table-wrap">
           <table>
             <thead id="phead"></thead>
@@ -102,12 +102,12 @@
   <button type="button" data-act="export">导出</button>
 </div>
 <div class="col-filter" id="colFilter" hidden>
-  <div class="hd">列筛选</div>
-  <input id="colFilterQ" placeholder="搜索" />
+  <label class="all"><input type="checkbox" id="colFilterAll" checked /> 所有</label>
+  <div class="search-row"><span>搜索:</span><input id="colFilterQ" /></div>
   <div class="list" id="colFilterList"></div>
   <div class="ft">
     <button type="button" class="btn" id="colFilterOk">确定</button>
-    <button type="button" class="btn btn-plain" id="colFilterCancel">取消</button>
+    <button type="button" class="btn btn-plain" id="colFilterCancel">关闭</button>
   </div>
 </div>
 <div class="modal" id="dlg">
@@ -123,8 +123,8 @@
     </div>
   </div>
 </div>
-<script src="crypto-lib.js?v=20261026j"></script>
-<script src="grid.js?v=20261026j"></script>
+<script src="crypto-lib.js?v=20261026k"></script>
+<script src="grid.js?v=20261026k"></script>
 <script>
 let data = { columns: [], rows: [] };
 let packing = { columns: [], rows: [] };
@@ -435,6 +435,9 @@ function renderPack() {
   });
   fillPager("ppager", rows.length);
   bindTableContext("#panelPack table", packCols());
+  const t = packing.fetchedAt || "";
+  const el = document.getElementById("packTime");
+  if (el) el.textContent = t ? "数据更新时间：" + t : "";
 }
 
 function hideCtx() {
@@ -501,7 +504,9 @@ function openColFilter() {
   const box = document.getElementById("colFilter");
   const list = document.getElementById("colFilterList");
   const q = document.getElementById("colFilterQ");
+  const allBox = document.getElementById("colFilterAll");
   q.value = "";
+  const syncAll = () => { allBox.checked = all.length > 0 && all.every(v => colFilterSel.has(v)); };
   const draw = () => {
     const kw = q.value.trim().toLowerCase();
     list.innerHTML = all.filter(v => !kw || v.toLowerCase().includes(kw)).map(v =>
@@ -511,26 +516,26 @@ function openColFilter() {
       inp.onchange = () => {
         if (inp.checked) colFilterSel.add(inp.value);
         else colFilterSel.delete(inp.value);
+        syncAll();
       };
     });
+    syncAll();
+  };
+  allBox.onchange = () => {
+    if (allBox.checked) all.forEach(v => colFilterSel.add(v));
+    else colFilterSel.clear();
+    draw();
   };
   q.oninput = draw;
   draw();
   box.hidden = false;
-  box.style.left = Math.min(ctxInfo.x, window.innerWidth - 260) + "px";
-  box.style.top = Math.min(ctxInfo.y, window.innerHeight - 320) + "px";
+  box.style.left = Math.min(ctxInfo.x, window.innerWidth - 280) + "px";
+  box.style.top = Math.min(ctxInfo.y, window.innerHeight - 360) + "px";
 }
 document.getElementById("ctxMenu").onclick = (e) => {
   const act = e.target.dataset.act;
   if (!act) return;
-  if (act === "filter") {
-    if (ctxInfo && ctxInfo.col) {
-      filters[ctxInfo.col.key] = ctxInfo.value || "";
-      delete filters["__in_" + ctxInfo.col.key];
-      refreshCurrentView();
-    }
-    hideCtx();
-  } else if (act === "colfilter") {
+  if (act === "filter" || act === "colfilter") {
     document.getElementById("ctxMenu").hidden = true;
     openColFilter();
   } else if (act === "clear") {
@@ -1057,6 +1062,7 @@ async function tryLogin(fromSaved) {
   const password = document.getElementById("loginPass").value.trim();
   document.getElementById("loginUser").value = username;
   if (!username) { err.textContent = "请输入用户名"; return; }
+  if (!password) { err.textContent = "请输入密码"; return; }
   try {
     let payload = null;
     let lastErr = null;
@@ -1082,6 +1088,7 @@ async function tryLogin(fromSaved) {
     data.rows = payload.rows || [];
     packing.columns = payload.packingColumns || packing.columns || [];
     packing.rows = payload.packingRows || packing.rows || [];
+    packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
     if (payload.users) users = { users: payload.users };
     fillUserAudit();
     fillAuditFields();
