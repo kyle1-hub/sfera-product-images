@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027packnum" />
+<link rel="stylesheet" href="srm.css?v=20261027nosupname" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027packnum"></script>
-<script src="grid.js?v=20261027packnum"></script>
+<script src="crypto-lib.js?v=20261027nosupname"></script>
+<script src="grid.js?v=20261027nosupname"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -192,7 +192,7 @@ let pageSize = 100;
 const PAGE_SIZES = [50, 100, 500, 10000];
 function valOf(row, key) { return row[key] == null ? "" : String(row[key]); }
 function packCols() {
-  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录");
+  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录" && c.key !== "supplierName" && c.label !== "供应商名称");
 }
 function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
