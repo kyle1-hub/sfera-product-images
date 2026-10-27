@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027pdflabel2" />
+<link rel="stylesheet" href="srm.css?v=20261027xlsxstop" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027pdflabel2"></script>
-<script src="grid.js?v=20261027pdflabel2"></script>
+<script src="crypto-lib.js?v=20261027xlsxstop"></script>
+<script src="grid.js?v=20261027xlsxstop"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -628,18 +628,28 @@ async function exportPackLabels() {
         ws.getCell("R" + r).value = null;
       }
     }
-    const sumRange = (col) => ({ formula: "SUM(" + col + startRow + ":" + col + lastData + ")" });
-    ws.getCell("B" + sumRow).value = { formula: "COUNTA(B" + startRow + ":B" + lastData + ")" };
-    ws.getCell("E" + sumRow).value = sumRange("E");
-    ws.getCell("I" + sumRow).value = sumRange("I");
-    ws.getCell("J" + sumRow).value = sumRange("J");
-    ws.getCell("K" + sumRow).value = sumRange("K");
-    ws.getCell("R" + sumRow).value = sumRange("R");
-    ws.getCell("O" + (35 + extra)).value = { formula: "E" + sumRow };
-    ws.getCell("O" + (36 + extra)).value = { formula: "R" + sumRow };
-    ws.getCell("O" + (37 + extra)).value = { formula: "I" + sumRow };
-    ws.getCell("O" + (38 + extra)).value = { formula: "J" + sumRow };
-    ws.getCell("O" + (39 + extra)).value = { formula: "K" + sumRow };
+    const nSum = (key) => picked.reduce((s, row) => s + (Number(numVal(row[key])) || 0), 0);
+    const sumE = nSum("qtp");
+    const sumI = nSum("cbm");
+    const sumJ = nSum("gross");
+    const sumK = nSum("net");
+    const sumR = picked.reduce((s, row) => {
+      const e = Number(numVal(row.qtp)) || 0;
+      const q = Number(numVal(row.perCarton)) || 0;
+      return s + e * q;
+    }, 0);
+    ["D","F","G","H","L","M","N","O","P","Q"].forEach(col => { ws.getCell(col + sumRow).value = null; });
+    ws.getCell("B" + sumRow).value = sumE;
+    ws.getCell("E" + sumRow).value = sumE;
+    ws.getCell("I" + sumRow).value = sumI;
+    ws.getCell("J" + sumRow).value = sumJ;
+    ws.getCell("K" + sumRow).value = sumK;
+    ws.getCell("R" + sumRow).value = sumR;
+    ws.getCell("O" + (35 + extra)).value = sumE;
+    ws.getCell("O" + (36 + extra)).value = sumR;
+    ws.getCell("O" + (37 + extra)).value = sumI;
+    ws.getCell("O" + (38 + extra)).value = sumJ;
+    ws.getCell("O" + (39 + extra)).value = sumK;
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
