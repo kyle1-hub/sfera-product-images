@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027nosupname" />
+<link rel="stylesheet" href="srm.css?v=20261027pub" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027nosupname"></script>
-<script src="grid.js?v=20261027nosupname"></script>
+<script src="crypto-lib.js?v=20261027pub"></script>
+<script src="grid.js?v=20261027pub"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -906,7 +906,11 @@ async function updatePackingNow() {
     page = 1;
     renderFilters();
     redrawCurrentView();
-    show("已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条");
+    let tip = "已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条";
+    if (info.published === "pushed") tip += "，已发布到网站";
+    else if (info.published === "no-change") tip += "，网站数据无变化";
+    show(tip);
+    if (info.publishError) ask("本机已更新，但发布网站失败：" + info.publishError);
   } catch (e) {
     ask((e && e.message) ? e.message : "更新失败");
   } finally {
