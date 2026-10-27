@@ -5,15 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
-<title>发票号查询</title>
-<link rel="icon" href="logo.png?v=20261027v2" />
-<link rel="apple-touch-icon" href="logo.png?v=20261027v2" />
-<link rel="stylesheet" href="srm.css?v=20261027v2" />
+<title>发票号查询 · 维护</title>
+<link rel="stylesheet" href="srm.css?v=20261027restore" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
   <div class="login-card">
-    <div class="login-hd"><img src="logo.png?v=20261027v2" alt="发票号查询" /></div>
+    <div class="login-hd">发票号查询</div>
     <div class="login-bd">
       <div class="item"><label>用户名</label><input id="loginUser" autocomplete="username" /></div>
       <div class="item"><label>密码</label><input id="loginPass" type="password" autocomplete="current-password" /></div>
@@ -24,7 +22,7 @@
 </div>
 <div class="shell" id="app" style="display:none">
   <aside class="sidebar">
-    <div class="logo"><img src="logo.png?v=20261027v2" alt="发票号查询" /></div>
+    <div class="logo"><span>发</span>发票号查询</div>
     <nav class="menu">
       <a href="javascript:void(0)" id="navUsers">账号管控</a>
       <a href="javascript:void(0)" class="active" id="navPack">装箱明细</a>
@@ -117,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027v2"></script>
-<script src="grid.js?v=20261027v2"></script>
+<script src="crypto-lib.js?v=20261027restore"></script>
+<script src="grid.js?v=20261027restore"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };

@@ -32,14 +32,16 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 16px;
   color: #fff;
   font-weight: 700;
   letter-spacing: .04em;
   border-bottom: 1px solid rgba(255,255,255,.06);
 }
-.logo img {
-  width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: #0b1220; flex: none;
+.logo span {
+  width: 22px; height: 22px; border-radius: 4px;
+  background: var(--srm-green); display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px;
 }
 .menu { padding: 10px 0; overflow: auto; }
 .menu a {
@@ -208,11 +210,7 @@ tbody tr:hover td { background: #e6f6f3; }
   width: 380px; background: #fff; border-radius: 4px; overflow: hidden;
   box-shadow: 0 8px 24px rgba(15,23,42,.08);
 }
-.login-hd {
-  background: #0b1220; color: #fff; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-}
-.login-hd img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+.login-hd { background: var(--srm-green); color: #fff; padding: 18px 22px; font-size: 18px; font-weight: 700; }
 .login-bd { padding: 22px; }
 .login-bd .item { display: block; width: auto; margin-bottom: 14px; }
 .login-bd label { display: block; margin-bottom: 6px; width: auto; flex: none; text-align: left; }
