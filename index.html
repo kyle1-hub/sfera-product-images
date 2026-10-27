@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027pdf" />
+<link rel="stylesheet" href="srm.css?v=20261027multi" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027pdf"></script>
-<script src="grid.js?v=20261027pdf"></script>
+<script src="crypto-lib.js?v=20261027multi"></script>
+<script src="grid.js?v=20261027multi"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -254,7 +254,10 @@ function matchFilters(row, cols) {
     const q = (filters[col.key] || "").trim();
     if (!q) return true;
     if (q === BLANK) return isBlankValue(v);
-    return v.toLowerCase().includes(q.toLowerCase());
+    const tokens = q.split(/[,，;；]+/).map(x => x.trim()).filter(Boolean);
+    if (!tokens.length) return true;
+    const low = v.toLowerCase();
+    return tokens.some(t => low.includes(t.toLowerCase()));
   });
 }
 function filteredPackList() {
@@ -290,13 +293,13 @@ function filterControl(col) {
     const opts = distinctOptions(col);
     return `<div class="item combo"><label>${esc(col.label)}</label>
       <div class="combo-box" data-key="${col.key}">
-        <input data-key="${col.key}" placeholder="输入搜索" value="${esc(val)}" autocomplete="off" />
+        <input data-key="${col.key}" placeholder="多个用逗号" value="${esc(val)}" autocomplete="off" />
         <div class="combo-list" hidden>${opts.map(o => `<button type="button" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
       </div>
     </div>`;
   }
   return `<div class="item"><label>${esc(col.label)}</label>
-    <input data-key="${col.key}" placeholder="请输入" value="${esc(val)}" />
+    <input data-key="${col.key}" placeholder="多个用逗号" value="${esc(val)}" />
   </div>`;
 }
 function bindCombos(root) {
