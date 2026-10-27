@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027pdflocal" />
+<link rel="stylesheet" href="srm.css?v=20261027xlsxins" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027pdflocal"></script>
-<script src="grid.js?v=20261027pdflocal"></script>
+<script src="crypto-lib.js?v=20261027xlsxins"></script>
+<script src="grid.js?v=20261027xlsxins"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -553,27 +553,30 @@ async function exportPackLabels() {
     await wb.xlsx.load(await res.arrayBuffer());
     const ws = wb.getWorksheet("Template") || wb.worksheets[0];
     const startRow = 17;
+    const templateDataEnd = 30;
+    const templateDataCount = templateDataEnd - startRow + 1;
+    const extra = Math.max(0, picked.length - templateDataCount);
+    if (extra > 0) {
+      const blanks = [];
+      for (let i = 0; i < extra; i++) blanks.push([]);
+      ws.spliceRows(templateDataEnd + 1, 0, ...blanks);
+    }
     const lastData = startRow + picked.length - 1;
+    const sumRow = templateDataEnd + 1 + extra;
     const srcRow = ws.getRow(startRow);
-    const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0070C0" } };
-    const headerFont = { name: "Calibri", color: { argb: "FFFFFFFF" }, bold: true };
     const dataFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
     const dataFont = { color: { argb: "FF000000" } };
-    for (let c = 2; c <= 24; c++) {
-      const cell = ws.getRow(16).getCell(c);
-      cell.fill = headerFill;
-      if (cell.font) cell.font = Object.assign({}, cell.font, headerFont);
-      else cell.font = headerFont;
-    }
-    for (let r = startRow + 1; r <= Math.max(lastData, 22); r++) {
-      for (let c = 2; c <= 24; c++) cloneCellStyle(srcRow.getCell(c), ws.getRow(r).getCell(c));
+    for (let r = startRow + 1; r <= lastData; r++) {
+      const row = ws.getRow(r);
+      if (srcRow.height) row.height = srcRow.height;
+      for (let c = 2; c <= 24; c++) cloneCellStyle(srcRow.getCell(c), row.getCell(c));
     }
     const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
     ws.getCell("Q6").value = inv;
     if (countries[0]) ws.getCell("Q8").value = countries[0];
     const brands = [...new Set(picked.map(r => String(r.brand || "").trim()).filter(Boolean))];
     if (brands[0]) ws.getCell("Q9").value = brands[0];
-    const cols = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R"];
+    const cols = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q"];
     picked.forEach((row, i) => {
       const r = startRow + i;
       const vals = {
@@ -591,7 +594,6 @@ async function exportPackLabels() {
         O: row.ce || "",
         P: row.description || "",
         Q: numVal(row.perCarton),
-        R: numVal(row.totalPcs),
       };
       cols.forEach(col => {
         const cell = ws.getCell(col + r);
@@ -600,21 +602,29 @@ async function exportPackLabels() {
         cell.font = dataFont;
         cell.fill = dataFill;
       });
+      const rCell = ws.getCell("R" + r);
+      rCell.value = { formula: "Q" + r + "*E" + r };
+      rCell.font = dataFont;
+      rCell.fill = dataFill;
     });
-    for (let r = lastData + 1; r <= 30; r++) {
-      cols.forEach(col => { ws.getCell(col + r).value = null; });
+    if (picked.length < templateDataCount) {
+      for (let r = lastData + 1; r <= templateDataEnd; r++) {
+        cols.forEach(col => { ws.getCell(col + r).value = null; });
+        ws.getCell("R" + r).value = null;
+      }
     }
     const sumRange = (col) => ({ formula: "SUM(" + col + startRow + ":" + col + lastData + ")" });
-    ws.getCell("E31").value = sumRange("E");
-    ws.getCell("I31").value = sumRange("I");
-    ws.getCell("J31").value = sumRange("J");
-    ws.getCell("K31").value = sumRange("K");
-    ws.getCell("R31").value = sumRange("R");
-    ws.getCell("O35").value = { formula: "E31" };
-    ws.getCell("O36").value = { formula: "R31" };
-    ws.getCell("O37").value = { formula: "I31" };
-    ws.getCell("O38").value = { formula: "J31" };
-    ws.getCell("O39").value = { formula: "K31" };
+    ws.getCell("B" + sumRow).value = { formula: "COUNTA(B" + startRow + ":B" + lastData + ")" };
+    ws.getCell("E" + sumRow).value = sumRange("E");
+    ws.getCell("I" + sumRow).value = sumRange("I");
+    ws.getCell("J" + sumRow).value = sumRange("J");
+    ws.getCell("K" + sumRow).value = sumRange("K");
+    ws.getCell("R" + sumRow).value = sumRange("R");
+    ws.getCell("O" + (35 + extra)).value = { formula: "E" + sumRow };
+    ws.getCell("O" + (36 + extra)).value = { formula: "R" + sumRow };
+    ws.getCell("O" + (37 + extra)).value = { formula: "I" + sumRow };
+    ws.getCell("O" + (38 + extra)).value = { formula: "J" + sumRow };
+    ws.getCell("O" + (39 + extra)).value = { formula: "K" + sumRow };
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
