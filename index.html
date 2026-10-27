@@ -192,7 +192,7 @@ let pageSize = 100;
 const PAGE_SIZES = [50, 100, 500, 10000];
 function valOf(row, key) { return row[key] == null ? "" : String(row[key]); }
 function packCols() {
-  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录" && c.key !== "supplierName" && c.label !== "供应商名称");
+  return (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录" && c.key !== "supplierName" && c.label !== "供应商名称" && c.key !== "gicode" && c.label !== "装箱单明细内码");
 }
 function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
