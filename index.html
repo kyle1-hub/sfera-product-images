@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027hdrblue" />
+<link rel="stylesheet" href="srm.css?v=20261027cbmfx" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027hdrblue"></script>
-<script src="grid.js?v=20261027hdrblue"></script>
+<script src="crypto-lib.js?v=20261027cbmfx"></script>
+<script src="grid.js?v=20261027cbmfx"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -599,7 +599,7 @@ async function exportPackLabels() {
     if (countries[0]) ws.getCell("Q8").value = countries[0];
     const brands = [...new Set(picked.map(r => String(r.brand || "").trim()).filter(Boolean))];
     if (brands[0]) ws.getCell("Q9").value = brands[0];
-    const cols = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q"];
+    const cols = ["D","E","F","G","H","J","K","L","M","N","O","P","Q"];
     picked.forEach((row, i) => {
       const r = startRow + i;
       const vals = {
@@ -608,7 +608,6 @@ async function exportPackLabels() {
         F: numVal(row.packlong),
         G: numVal(row.packwidth),
         H: numVal(row.packhigh),
-        I: numVal(row.cbm),
         J: numVal(row.gross),
         K: numVal(row.net),
         L: row.supplierCode || "",
@@ -625,6 +624,11 @@ async function exportPackLabels() {
         cell.font = dataFont;
         cell.fill = dataFill;
       });
+      const iCell = ws.getCell("I" + r);
+      iCell.value = { formula: "F" + r + "*G" + r + "*H" + r + "*E" + r + "*0.000001" };
+      iCell.numFmt = "0.00";
+      iCell.font = dataFont;
+      iCell.fill = dataFill;
       const rCell = ws.getCell("R" + r);
       rCell.value = { formula: "Q" + r + "*E" + r };
       rCell.font = dataFont;
@@ -633,12 +637,19 @@ async function exportPackLabels() {
     if (picked.length < templateDataCount) {
       for (let r = lastData + 1; r <= templateDataEnd; r++) {
         cols.forEach(col => { ws.getCell(col + r).value = null; });
+        ws.getCell("I" + r).value = null;
         ws.getCell("R" + r).value = null;
       }
     }
     const nSum = (key) => picked.reduce((s, row) => s + (Number(numVal(row[key])) || 0), 0);
     const sumE = nSum("qtp");
-    const sumI = nSum("cbm");
+    const sumI = picked.reduce((s, row) => {
+      const e = Number(numVal(row.qtp)) || 0;
+      const L = Number(numVal(row.packlong)) || 0;
+      const W = Number(numVal(row.packwidth)) || 0;
+      const H = Number(numVal(row.packhigh)) || 0;
+      return s + L * W * H * e * 0.000001;
+    }, 0);
     const sumJ = nSum("gross");
     const sumK = nSum("net");
     const sumR = picked.reduce((s, row) => {
