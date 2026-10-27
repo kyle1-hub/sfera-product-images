@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027pub" />
+<link rel="stylesheet" href="srm.css?v=20261027pdf" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,11 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027pub"></script>
-<script src="grid.js?v=20261027pub"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="crypto-lib.js?v=20261027pdf"></script>
+<script src="grid.js?v=20261027pdf"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -621,6 +624,245 @@ async function exportPackLabels() {
     ask(e.message || "导出失败");
   }
 }
+const COUNTRY_META = {
+  ARGENTINA: { n: 1, code: "AR", name: "ARGENTINA", consignee: "VISION 101 S.A." },
+  MEXICO: { n: 2, code: "MX", name: "MÉXICO", consignee: "BIJOU MEXICO S.A. de C.V." },
+  CHILE: { n: 3, code: "CL", name: "CHILE", consignee: "BIJOU CHILE SPA" },
+  PERU: { n: 4, code: "PE", name: "PERÚ", consignee: "BIJOU PERU S.A.C." },
+  BRAZIL: { n: 5, code: "BR", name: "BRAZIL", consignee: "KSE IMPORTACAO E DISTRIBUICAO LTDA" },
+  PARAGUAY: { n: 6, code: "PY", name: "PARAGUAY", consignee: "LAZOS S.A" },
+  GUATEMALA: { n: 7, code: "GT", name: "GUATEMALA", consignee: "TENDENCIA S.A." },
+  ELSALVADOR: { n: 8, code: "SV", name: "EL SALVADOR", consignee: "IMPULSO, SA DE CV" },
+  URUGUAY: { n: 9, code: "UY", name: "URUGUAY", consignee: "EL HOGAR DE LAS MEDIAS S.A." },
+  ESPANA: { n: 10, code: "ES", name: "ESPAÑA", consignee: "IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA" },
+  SPAIN: { n: 10, code: "ES", name: "ESPAÑA", consignee: "IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA" },
+  BOLIVIA: { n: 11, code: "BO", name: "BOLIVIA", consignee: "Sinfronteras SRL" },
+};
+const BRAND_CODE = { TODOMODA: "TM", ISADORA: "IS", BLUMI: "BLUMI" };
+function countryKeyOf(v) {
+  return String(v || "").trim().split("-")[0].trim().toUpperCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "");
+}
+function countryMetaOf(v) {
+  const key = countryKeyOf(v);
+  if (COUNTRY_META[key]) return COUNTRY_META[key];
+  const hit = Object.keys(COUNTRY_META).find(k => key.includes(k) || k.includes(key));
+  return hit ? COUNTRY_META[hit] : { n: "", code: "", name: String(v || "").split("-")[0].trim().toUpperCase(), consignee: "" };
+}
+function brandCodeOf(v) {
+  const s = String(v || "").trim().toUpperCase();
+  return BRAND_CODE[s] || s.slice(0, 2);
+}
+function fmtDateShort(v) {
+  if (!v) return "";
+  if (v instanceof Date && !isNaN(v)) {
+    const mon = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][v.getMonth()];
+    return mon + " " + String(v.getFullYear()).slice(-2);
+  }
+  const s = String(v).trim();
+  const m = s.match(/(\d{4})[-/](\d{1,2})/);
+  if (m) {
+    const mon = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][Number(m[2]) - 1];
+    return (mon || "") + " " + m[1].slice(-2);
+  }
+  return s;
+}
+function pickedOfficialRows() {
+  const list = filteredPackList();
+  const picked = [];
+  const bad = [];
+  list.forEach((row, i) => {
+    if (!packSelected.has(row.id)) return;
+    const n = i + 1;
+    if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
+    else picked.push(row);
+  });
+  return { picked, bad };
+}
+function expandCartonLabels(picked) {
+  const labels = [];
+  picked.forEach(row => {
+    const n = Math.max(0, Math.round(Number(String(row.qtp || "").replace(/,/g, "")) || 0));
+    const gw = Number(String(row.gross || "").replace(/,/g, "")) || 0;
+    const nw = Number(String(row.net || "").replace(/,/g, "")) || 0;
+    const L = String(row.packlong || "").trim();
+    const W = String(row.packwidth || "").trim();
+    const H = String(row.packhigh || "").trim();
+    const size = [L, W, H].filter(Boolean).join("X") || String(row.cartonSize || "").replace(/x/gi, "X").replace(/\s/g, "");
+    const perGw = n ? gw / n : gw;
+    const perNw = n ? nw / n : nw;
+    const qty = n || 1;
+    for (let i = 1; i <= qty; i++) {
+      labels.push({
+        row,
+        skuNo: i,
+        skuTotal: qty,
+        size,
+        gw: perGw,
+        nw: perNw,
+      });
+    }
+  });
+  labels.forEach((lab, i) => {
+    lab.boxNo = i + 1;
+    lab.boxTotal = labels.length;
+  });
+  return labels;
+}
+function round2n(n) {
+  if (!Number.isFinite(n)) return "";
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+function canvasToDataUrl(text, kind) {
+  if (kind === "barcode") {
+    const c = document.createElement("canvas");
+    JsBarcode(c, text, { format: "CODE128", displayValue: false, margin: 0, height: 42, width: 1.4 });
+    return c.toDataURL("image/png");
+  }
+  return "";
+}
+async function qrDataUrl(text) {
+  return QRCode.toDataURL(text, { margin: 0, width: 240, errorCorrectionLevel: "M" });
+}
+function drawLabelPage(doc, lab, meta, inv, brandCode) {
+  const w = 100, h = 100;
+  const ink = [0, 0, 0];
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.35);
+  doc.rect(1.2, 1.2, w - 2.4, h - 2.4);
+  doc.line(1.2, 14.6, w - 1.2, 14.6);
+  doc.line(34.2, 1.2, 34.2, 14.6);
+  doc.line(67.2, 1.2, 67.2, 14.6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6);
+  doc.text("COUNTRY", 17.1, 4.4, { align: "center" });
+  doc.text("PO", 50.7, 4.4, { align: "center" });
+  doc.text("BRAND", 83.6, 4.4, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text((meta.n ? meta.n + " " : "") + (meta.code || ""), 17.1, 11.6, { align: "center" });
+  doc.setFontSize(14);
+  doc.text(String(lab.row.po || ""), 50.7, 11.6, { align: "center" });
+  doc.text(String(brandCode || ""), 83.6, 11.6, { align: "center" });
+  doc.line(1.2, 20.2, w - 1.2, 20.2);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6);
+  doc.text("INVOICE", 50, 18.3, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(String(inv || ""), 50, 27.2, { align: "center" });
+  doc.line(1.2, 30.2, w - 1.2, 30.2);
+  const qrX = 77.2, qrS = 21.4;
+  doc.rect(qrX, 30.2, w - 1.2 - qrX, 39.6);
+  doc.line(1.2, 41.8, qrX, 41.8);
+  doc.line(39.6, 30.2, 39.6, 41.8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(5.5);
+  doc.text("SKU (QUANTITY)", 20.4, 33.4, { align: "center" });
+  doc.text("CARTONS OF SKU", 58.4, 33.4, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  const sku = String(lab.row.ho || "").trim();
+  const pcs = String(lab.row.perCarton || "").trim();
+  doc.text(sku + (pcs ? " (" + pcs + ")" : ""), 20.4, 39.4, { align: "center" });
+  doc.text(lab.skuNo + " / " + lab.skuTotal, 58.4, 39.4, { align: "center" });
+  const hasBb = String(lab.row.bestBefore || "").trim();
+  const hasBatch = String(lab.row.batch || "").trim();
+  doc.line(1.2, 47.6, qrX, 47.6);
+  doc.line(39.6, 41.8, 39.6, 55.2);
+  doc.line(1.2, 55.2, qrX, 55.2);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(5.5);
+  doc.text("BEST BEFORE", 20.4, 44.6, { align: "center" });
+  doc.text("BATCH", 58.4, 44.6, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(fmtDateShort(hasBb) || " ", 20.4, 53.2, { align: "center" });
+  doc.text(hasBatch || " ", 58.4, 53.2, { align: "center" });
+  doc.line(1.2, 62.4, qrX, 62.4);
+  doc.line(26.6, 55.2, 26.6, 62.4);
+  doc.line(53.2, 55.2, 53.2, 62.4);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(5);
+  doc.text("Size Box", 13.9, 57.6, { align: "center" });
+  doc.text("GW", 39.9, 57.6, { align: "center" });
+  doc.text("NW", 65.2, 57.6, { align: "center" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.5);
+  doc.text(lab.size || "", 13.9, 61.2, { align: "center" });
+  doc.text(round2n(lab.gw), 39.9, 61.2, { align: "center" });
+  doc.text(round2n(lab.nw), 65.2, 61.2, { align: "center" });
+  doc.line(1.2, 84.2, w - 1.2, 84.2);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  const cons = String(meta.consignee || "");
+  if (cons) {
+    const lines = doc.splitTextToSize(cons, 90);
+    doc.text(lines.slice(0, 2), 50, 67.8, { align: "center" });
+  }
+  doc.text(String(meta.name || ""), 50, 75.2, { align: "center" });
+  doc.text("MADE IN CHINA", 50, 82.2, { align: "center" });
+  const comment = String(lab.row.comments || lab.row.comment || "").trim();
+  if (comment) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text(comment, 50, 88.0, { align: "center" });
+  }
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.5);
+  doc.text("N° " + lab.boxNo + " / " + lab.boxTotal, w - 3.2, h - 2.8, { align: "right" });
+  return { qrX, qrY: 31.0, qrS, barY: 89.2 };
+}
+async function exportPackPdf() {
+  const { picked, bad } = pickedOfficialRows();
+  if (bad.length) { ask(bad.join("；")); return; }
+  if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
+  if (countries.length > 1) {
+    ask("勾选的明细包含多个国家，请按同一国家导出");
+    return;
+  }
+  if (typeof window.jspdf === "undefined" || !window.jspdf.jsPDF) {
+    ask("PDF 组件未加载，请刷新后再试");
+    return;
+  }
+  if (typeof QRCode === "undefined" || typeof JsBarcode === "undefined") {
+    ask("标签组件未加载，请刷新后再试");
+    return;
+  }
+  try {
+    const labels = expandCartonLabels(picked);
+    if (!labels.length) { ask("没有可展开的箱数"); return; }
+    const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
+    const meta = countryMetaOf(countries[0] || picked[0].country);
+    const brandCode = brandCodeOf(picked.map(r => r.brand).find(Boolean) || "");
+    const JsPDF = window.jspdf.jsPDF;
+    const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
+    for (let i = 0; i < labels.length; i++) {
+      if (i) doc.addPage([100, 100], "portrait");
+      const lab = labels[i];
+      const pos = drawLabelPage(doc, lab, meta, inv, brandCode);
+      const codeText = [meta.n, inv, lab.boxNo + "/" + lab.boxTotal].filter(Boolean).join(" - ");
+      try {
+        const qr = await qrDataUrl(codeText || String(lab.row.ho || inv || "A71"));
+        doc.addImage(qr, "PNG", pos.qrX + 0.6, pos.qrY, pos.qrS - 1.2, pos.qrS - 1.2);
+      } catch (e) {}
+      try {
+        const bar = canvasToDataUrl(codeText || String(inv || "A71"), "barcode");
+        if (bar) {
+          doc.addImage(bar, "PNG", 12, pos.barY, 76, 6.2);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(6);
+          doc.text(codeText, 50, pos.barY + 8.2, { align: "center" });
+        }
+      } catch (e) {}
+    }
+    const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
+    doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas.pdf");
+  } catch (e) {
+    ask(e.message || "导出 PDF 失败");
+  }
+}
 
 function thHtml(col, extra) {
   const on = Array.isArray(filters["__in_" + col.key]) && filters["__in_" + col.key].length;
@@ -861,9 +1103,12 @@ function renderToolbar() {
     const updateBtn = currentUser.isAdmin
       ? `<button class="btn" id="btnUpdatePack">更新数据</button>`
       : "";
-    bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` + updateBtn;
+    bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` +
+      `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>` + updateBtn;
     const btn = document.getElementById("btnExportPack");
     if (btn) btn.onclick = exportPackLabels;
+    const pdfBtn = document.getElementById("btnExportPdf");
+    if (pdfBtn) pdfBtn.onclick = exportPackPdf;
   }
   const addUser = document.getElementById("addUser");
   if (addUser) addUser.onclick = () => openUserModal(-1);
