@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027multi" />
+<link rel="stylesheet" href="srm.css?v=20261027pdflocal" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,11 +115,11 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027multi"></script>
-<script src="grid.js?v=20261027multi"></script>
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/qrcode.min.js"></script>
+<script src="lib/JsBarcode.all.min.js"></script>
+<script src="crypto-lib.js?v=20261027pdflocal"></script>
+<script src="grid.js?v=20261027pdflocal"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -716,16 +716,27 @@ function round2n(n) {
   if (!Number.isFinite(n)) return "";
   return (Math.round(n * 100) / 100).toFixed(2);
 }
-function canvasToDataUrl(text, kind) {
-  if (kind === "barcode") {
-    const c = document.createElement("canvas");
-    JsBarcode(c, text, { format: "CODE128", displayValue: false, margin: 0, height: 42, width: 1.4 });
-    return c.toDataURL("image/png");
-  }
-  return "";
+function barcodeApi() {
+  return window.JsBarcode || window.jsbarcode;
+}
+function qrApi() {
+  const q = window.QRCode || (window.qrcode && window.qrcode.default) || window.qrcode;
+  if (q && typeof q.toDataURL === "function") return q;
+  if (q && q.default && typeof q.default.toDataURL === "function") return q.default;
+  return null;
+}
+function canvasToDataUrl(text) {
+  const api = barcodeApi();
+  if (!api) return "";
+  const safe = String(text || "A71").replace(/[^\x20-\x7E]/g, "-");
+  const c = document.createElement("canvas");
+  api(c, safe, { format: "CODE128", displayValue: false, margin: 0, height: 42, width: 1.4 });
+  return c.toDataURL("image/png");
 }
 async function qrDataUrl(text) {
-  return QRCode.toDataURL(text, { margin: 0, width: 240, errorCorrectionLevel: "M" });
+  const api = qrApi();
+  if (!api) return "";
+  return api.toDataURL(String(text || "A71"), { margin: 0, width: 240, errorCorrectionLevel: "M" });
 }
 function drawLabelPage(doc, lab, meta, inv, brandCode) {
   const w = 100, h = 100;
@@ -825,12 +836,9 @@ async function exportPackPdf() {
     ask("勾选的明细包含多个国家，请按同一国家导出");
     return;
   }
-  if (typeof window.jspdf === "undefined" || !window.jspdf.jsPDF) {
+  const JsPDF = window.jspdf && window.jspdf.jsPDF;
+  if (!JsPDF) {
     ask("PDF 组件未加载，请刷新后再试");
-    return;
-  }
-  if (typeof QRCode === "undefined" || typeof JsBarcode === "undefined") {
-    ask("标签组件未加载，请刷新后再试");
     return;
   }
   try {
@@ -839,19 +847,18 @@ async function exportPackPdf() {
     const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
     const meta = countryMetaOf(countries[0] || picked[0].country);
     const brandCode = brandCodeOf(picked.map(r => r.brand).find(Boolean) || "");
-    const JsPDF = window.jspdf.jsPDF;
     const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
     for (let i = 0; i < labels.length; i++) {
       if (i) doc.addPage([100, 100], "portrait");
       const lab = labels[i];
       const pos = drawLabelPage(doc, lab, meta, inv, brandCode);
-      const codeText = [meta.n, inv, lab.boxNo + "/" + lab.boxTotal].filter(Boolean).join(" - ");
+      const codeText = [meta.n, inv, lab.boxNo + "/" + lab.boxTotal].filter(Boolean).join(" - ") || "A71";
       try {
-        const qr = await qrDataUrl(codeText || String(lab.row.ho || inv || "A71"));
-        doc.addImage(qr, "PNG", pos.qrX + 0.6, pos.qrY, pos.qrS - 1.2, pos.qrS - 1.2);
+        const qr = await qrDataUrl(codeText);
+        if (qr) doc.addImage(qr, "PNG", pos.qrX + 0.6, pos.qrY, pos.qrS - 1.2, pos.qrS - 1.2);
       } catch (e) {}
       try {
-        const bar = canvasToDataUrl(codeText || String(inv || "A71"), "barcode");
+        const bar = canvasToDataUrl(codeText);
         if (bar) {
           doc.addImage(bar, "PNG", 12, pos.barY, 76, 6.2);
           doc.setFont("helvetica", "normal");
