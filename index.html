@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027btn" />
+<link rel="stylesheet" href="srm.css?v=20261027api" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027btn"></script>
-<script src="grid.js?v=20261027btn"></script>
+<script src="crypto-lib.js?v=20261027api"></script>
+<script src="grid.js?v=20261027api"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -870,18 +870,28 @@ function renderToolbar() {
   const upd = document.getElementById("btnUpdatePack");
   if (upd) upd.onclick = updatePackingNow;
 }
+const LOCAL_API = "http://127.0.0.1:8791";
 async function updatePackingNow() {
   if (!currentUser.isAdmin) return;
   const btn = document.getElementById("btnUpdatePack");
   if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
   show("正在拉取装箱明细，请稍候");
   try {
-    const r = await fetch("/api/update-packing", { method: "POST" });
+    let pingOk = false;
+    try {
+      const ping = await fetch(LOCAL_API + "/api/ping", { cache: "no-store" });
+      pingOk = ping.ok;
+    } catch (e) { pingOk = false; }
+    if (!pingOk) {
+      ask("本机更新服务没有开。请先双击「启动发票号查询.bat」，看到浏览器打开本机页面后再点更新数据。");
+      return;
+    }
+    const r = await fetch(LOCAL_API + "/api/update-packing", { method: "POST" });
     const text = await r.text();
     let info = null;
     try { info = JSON.parse(text); } catch (e) {}
     if (!r.ok || !info || !info.ok) {
-      const msg = (info && info.error) || (r.status === 404 ? "当前不是本机服务，无法取数。请运行「启动发票号查询」后再点更新。" : "更新失败");
+      const msg = (info && info.error) || "更新失败";
       ask(msg);
       return;
     }
@@ -898,7 +908,7 @@ async function updatePackingNow() {
     redrawCurrentView();
     show("已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条");
   } catch (e) {
-    ask("无法连接本机更新服务。请先运行「启动发票号查询」。");
+    ask((e && e.message) ? e.message : "更新失败");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "更新数据"; }
     setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 4000);
