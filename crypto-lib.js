@@ -85,7 +85,7 @@ async function buildVault(columns, rows, users, packing) {
   const histRows = (packing && packing.history) || [];
   for (const u of list) {
     const uname = String(u.username).trim().toUpperCase();
-    const pwd = String(u.password).trim().toUpperCase();
+    const pwd = String(u.password).trim();
     const isAdmin = uname === "ADMIN";
     const minePack = isAdmin ? packRows : packRows.filter(r => rowVisibleTo(r, uname, packCols));
     const mineHist = isAdmin ? histRows : histRows.filter(r => rowVisibleTo(r, uname, histCols));
@@ -106,7 +106,7 @@ async function buildVault(columns, rows, users, packing) {
         return {
           username: un,
           name: x.name || "",
-          password: String(x.password || "").trim().toUpperCase(),
+          password: String(x.password || "").trim(),
           createdBy: x.createdBy || un,
           createdAt: x.createdAt || "",
           updatedBy: x.updatedBy || un,
@@ -126,13 +126,11 @@ async function buildVault(columns, rows, users, packing) {
 async function unlockPack(pack, password) {
   const raw = String(password || "").trim();
   if (!raw) throw new Error("请输入密码");
-  const tries = [...new Set([raw, raw.toUpperCase(), raw.toLowerCase()].filter(Boolean))];
-  for (const pwd of tries) {
-    try {
-      return await decryptJson(pack, pwd);
-    } catch (e) {}
+  try {
+    return await decryptJson(pack, raw);
+  } catch (e) {
+    throw new Error("密码不对");
   }
-  throw new Error("密码不对");
 }
 async function unlockVault(vault, username, password) {
   const uname = String(username || "").trim().toUpperCase();

@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027restore" />
+<link rel="stylesheet" href="srm.css?v=20261027pwd" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027restore"></script>
-<script src="grid.js?v=20261027restore"></script>
+<script src="crypto-lib.js?v=20261027pwd"></script>
+<script src="grid.js?v=20261027pwd"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -157,7 +157,7 @@ function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
 }
 function saveSession(username, password) {
-  const rec = { username, password: String(password || "").toUpperCase(), last: Date.now() };
+  const rec = { username, password: String(password || "").trim(), last: Date.now() };
   try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(rec)); } catch (e) {}
 }
 function readSession() {
@@ -959,7 +959,7 @@ document.getElementById("modalOk").onclick = () => {
   const rec = {
     username: document.getElementById("f_username").value.trim().toUpperCase(),
     name: document.getElementById("f_name").value.trim(),
-    password: document.getElementById("f_password").value.trim().toUpperCase(),
+    password: document.getElementById("f_password").value.trim(),
   };
   const who = operatorName();
   const t = nowText();
@@ -994,17 +994,6 @@ document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setVi
 document.getElementById("navPack").onclick = (e) => { e.preventDefault(); setView("pack"); };
 document.getElementById("navHistory").onclick = (e) => { e.preventDefault(); setView("history"); };
 function reloadView() {
-  try {
-    const savedUsers = JSON.parse(localStorage.getItem("invoice.users") || "null");
-    if (savedUsers && savedUsers.users) users = normalizeUsers(savedUsers);
-  } catch (e) {}
-  try {
-    const savedPack = JSON.parse(localStorage.getItem("invoice.packing") || "null");
-    if (savedPack && savedPack.rows) packing = savedPack;
-  } catch (e) {}
-  if (!packing.columns) packing.columns = [];
-  if (!packing.rows) packing.rows = [];
-  fillUserAudit();
   page = 1;
   renderFilters();
   redrawCurrentView();
@@ -1063,6 +1052,7 @@ async function tryLogin(fromSaved) {
     packing.history = payload.packingHistory || packing.history || [];
     if (payload.users) users = { users: payload.users };
     fillUserAudit();
+    try { localStorage.removeItem("invoice.users"); } catch (e) {}
     saveSession(username, password);
     afterLogin();
   } catch (e) {
@@ -1094,7 +1084,7 @@ function normalizeUsers(u) {
       return {
         username,
         name: x.name || "",
-        password: String(x.password || "").trim().toUpperCase(),
+        password: String(x.password || "").trim(),
         createdBy: x.createdBy || username,
         createdAt: x.createdAt || "",
         updatedBy: x.updatedBy || username,
