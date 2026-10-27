@@ -505,6 +505,25 @@ function cloneCellStyle(from, to) {
   if (from.fill) to.fill = JSON.parse(JSON.stringify(from.fill));
   if (from.numFmt) to.numFmt = from.numFmt;
 }
+function insertRowsBeforeTotals(ws, atRow, extra) {
+  if (!extra) return;
+  const merges = ws._merges || {};
+  const moved = [];
+  Object.keys(merges).forEach(key => {
+    const m = (merges[key] && merges[key].model) || merges[key];
+    if (!m || m.top < atRow) return;
+    moved.push({ top: m.top, left: m.left, bottom: m.bottom, right: m.right });
+  });
+  moved.forEach(m => {
+    ws.unMergeCells(m.top, m.left, m.bottom, m.right);
+  });
+  const blanks = [];
+  for (let i = 0; i < extra; i++) blanks.push([]);
+  ws.spliceRows(atRow, 0, ...blanks);
+  moved.forEach(m => {
+    ws.mergeCells(m.top + extra, m.left, m.bottom + extra, m.right);
+  });
+}
 function templateCountry(v) {
   const s = String(v || "").trim();
   if (!s) return "";
@@ -556,11 +575,7 @@ async function exportPackLabels() {
     const templateDataEnd = 30;
     const templateDataCount = templateDataEnd - startRow + 1;
     const extra = Math.max(0, picked.length - templateDataCount);
-    if (extra > 0) {
-      const blanks = [];
-      for (let i = 0; i < extra; i++) blanks.push([]);
-      ws.spliceRows(templateDataEnd + 1, 0, ...blanks);
-    }
+    insertRowsBeforeTotals(ws, templateDataEnd + 1, extra);
     const lastData = startRow + picked.length - 1;
     const sumRow = templateDataEnd + 1 + extra;
     const srcRow = ws.getRow(startRow);
