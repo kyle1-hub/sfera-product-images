@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027xlsxins" />
+<link rel="stylesheet" href="srm.css?v=20261027pdflabel2" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027xlsxins"></script>
-<script src="grid.js?v=20261027xlsxins"></script>
+<script src="crypto-lib.js?v=20261027pdflabel2"></script>
+<script src="grid.js?v=20261027pdflabel2"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -653,18 +653,18 @@ async function exportPackLabels() {
   }
 }
 const COUNTRY_META = {
-  ARGENTINA: { n: 1, code: "AR", name: "ARGENTINA", consignee: "VISION 101 S.A." },
-  MEXICO: { n: 2, code: "MX", name: "MÉXICO", consignee: "BIJOU MEXICO S.A. de C.V." },
-  CHILE: { n: 3, code: "CL", name: "CHILE", consignee: "BIJOU CHILE SPA" },
-  PERU: { n: 4, code: "PE", name: "PERÚ", consignee: "BIJOU PERU S.A.C." },
-  BRAZIL: { n: 5, code: "BR", name: "BRAZIL", consignee: "KSE IMPORTACAO E DISTRIBUICAO LTDA" },
-  PARAGUAY: { n: 6, code: "PY", name: "PARAGUAY", consignee: "LAZOS S.A" },
-  GUATEMALA: { n: 7, code: "GT", name: "GUATEMALA", consignee: "TENDENCIA S.A." },
-  ELSALVADOR: { n: 8, code: "SV", name: "EL SALVADOR", consignee: "IMPULSO, SA DE CV" },
-  URUGUAY: { n: 9, code: "UY", name: "URUGUAY", consignee: "EL HOGAR DE LAS MEDIAS S.A." },
-  ESPANA: { n: 10, code: "ES", name: "ESPAÑA", consignee: "IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA" },
-  SPAIN: { n: 10, code: "ES", name: "ESPAÑA", consignee: "IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA" },
-  BOLIVIA: { n: 11, code: "BO", name: "BOLIVIA", consignee: "Sinfronteras SRL" },
+  ARGENTINA: { n: 1, code: "AR", name: "ARGENTINA", lines: ["VISION 101 S.A.", "ARGENTINA"] },
+  MEXICO: { n: 2, code: "MX", name: "MEXICO", lines: ["BIJOU MEXICO S.A. de C.V.", "MEXICO"] },
+  CHILE: { n: 3, code: "CL", name: "CHILE", lines: ["BIJOU CHILE SPA", "CHILE"] },
+  PERU: { n: 4, code: "PE", name: "PERU", lines: ["BIJOU PERU S.A.C.", "PERU"] },
+  BRAZIL: { n: 5, code: "BR", name: "BRAZIL", lines: ["Importado por: KSE IMPORTACAO E DISTRIBUICAO LTDA", "Distribuido por: BSG Bijou Brasil Comercio Varejista Ltda", "BRAZIL"] },
+  PARAGUAY: { n: 6, code: "PY", name: "PARAGUAY", lines: ["LAZOS S.A.", "PARAGUAY"] },
+  GUATEMALA: { n: 7, code: "GT", name: "GUATEMALA", lines: ["TENDENCIA S.A.", "44 CALLE 16-89 ZONA 12, COLONIA LA COLINA - CIUDAD DE GUATEMALA - GUATEMALA", "NIT: 2590140-0", "PBX: 2303-0000"] },
+  ELSALVADOR: { n: 8, code: "SV", name: "EL SALVADOR", lines: ["Importado por: IMPULSO, SA DE CV", "CALLE SIEMENS #54, URBANIZACIÓN INDUSTRIAL SANTA ELENA, ANTIGUO CUSCATLÁN – LA LIBERTAD - EL SALVADOR", "NIT 0501-130309-101-7", "PBX (503) 2535-6852"] },
+  URUGUAY: { n: 9, code: "UY", name: "URUGUAY", lines: ["Importado en URUGUAY por:", "EL HOGAR DE LAS MEDIAS S.A.", "RUT: 210185650015 - 18 DE JULIO 913", "MONTEVIDEO - URUGUAY"] },
+  ESPANA: { n: 10, code: "ES", name: "ESPANA", lines: ["IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA", "ESPAÑA"] },
+  SPAIN: { n: 10, code: "ES", name: "ESPANA", lines: ["IUNITI COMERCIO ESPAÑA, SOCIEDAD LIMITADA", "ESPAÑA"] },
+  BOLIVIA: { n: 11, code: "BO", name: "BOLIVIA", lines: ["Sinfronteras SRL", "BOLIVIA"] },
 };
 const BRAND_CODE = { TODOMODA: "TM", ISADORA: "IS", BLUMI: "BLUMI" };
 function countryKeyOf(v) {
@@ -675,7 +675,9 @@ function countryMetaOf(v) {
   const key = countryKeyOf(v);
   if (COUNTRY_META[key]) return COUNTRY_META[key];
   const hit = Object.keys(COUNTRY_META).find(k => key.includes(k) || k.includes(key));
-  return hit ? COUNTRY_META[hit] : { n: "", code: "", name: String(v || "").split("-")[0].trim().toUpperCase(), consignee: "" };
+  if (hit) return COUNTRY_META[hit];
+  const name = String(v || "").split("-")[0].trim().toUpperCase();
+  return { n: "", code: "", name, lines: [name] };
 }
 function brandCodeOf(v) {
   const s = String(v || "").trim().toUpperCase();
@@ -707,39 +709,75 @@ function pickedOfficialRows() {
   });
   return { picked, bad };
 }
+function pNum(v) {
+  const n = Number(String(v == null ? "" : v).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+function skuOf(row) {
+  return {
+    sku: String(row.ho || "").trim(),
+    qtyPer: pNum(row.perCarton),
+    bestBefore: fmtDateShort(row.bestBefore),
+    batch: String(row.batch || "").trim(),
+    comments: String(row.comments || row.comment || "").trim().slice(0, 50),
+  };
+}
 function expandCartonLabels(picked) {
-  const labels = [];
+  const groups = [];
+  let cur = null;
   picked.forEach(row => {
-    const n = Math.max(0, Math.round(Number(String(row.qtp || "").replace(/,/g, "")) || 0));
-    const gw = Number(String(row.gross || "").replace(/,/g, "")) || 0;
-    const nw = Number(String(row.net || "").replace(/,/g, "")) || 0;
-    const L = String(row.packlong || "").trim();
-    const W = String(row.packwidth || "").trim();
-    const H = String(row.packhigh || "").trim();
-    const size = [L, W, H].filter(Boolean).join("X") || String(row.cartonSize || "").replace(/x/gi, "X").replace(/\s/g, "");
-    const perGw = n ? gw / n : gw;
-    const perNw = n ? nw / n : nw;
-    const qty = n || 1;
-    for (let i = 1; i <= qty; i++) {
-      labels.push({
-        row,
-        skuNo: i,
-        skuTotal: qty,
-        size,
-        gw: perGw,
-        nw: perNw,
+    const qty = Math.max(0, Math.round(pNum(row.qtp)));
+    const sku = String(row.ho || "").trim();
+    const po = String(row.po || "").trim();
+    if (!sku && !po && !qty) return;
+    const skuObj = skuOf(row);
+    if (qty > 0 && sku) {
+      cur = {
+        po,
+        qty,
+        L: pNum(row.packlong),
+        W: pNum(row.packwidth),
+        H: pNum(row.packhigh),
+        cbm: pNum(row.cbm),
+        gross: pNum(row.gross),
+        net: pNum(row.net),
+        skus: [skuObj],
+      };
+      groups.push(cur);
+    } else if (cur && sku) {
+      cur.skus.push(skuObj);
+    }
+  });
+  const boxes = [];
+  let cartonNumber = 0;
+  groups.forEach(g => {
+    const n = g.qty || 0;
+    const gwP = n ? g.gross / n : g.gross;
+    const nwP = n ? g.net / n : g.net;
+    const skuSig = g.skus.map(s => s.sku).join("|");
+    for (let b = 0; b < n; b++) {
+      cartonNumber++;
+      boxes.push({
+        po: g.po,
+        L: g.L, W: g.W, H: g.H,
+        gross: gwP, net: nwP,
+        skus: g.skus,
+        skuSig,
+        cartonNumber,
+        cartonInGroup: 0,
+        totalInGroup: 0,
+        qr: [String(cartonNumber)].concat(g.skus.map(s => s.sku)).join(" "),
       });
     }
   });
-  labels.forEach((lab, i) => {
-    lab.boxNo = i + 1;
-    lab.boxTotal = labels.length;
+  const sigCount = {}, sigPos = {};
+  boxes.forEach(b => { sigCount[b.skuSig] = (sigCount[b.skuSig] || 0) + 1; });
+  boxes.forEach(b => {
+    sigPos[b.skuSig] = (sigPos[b.skuSig] || 0) + 1;
+    b.cartonInGroup = sigPos[b.skuSig];
+    b.totalInGroup = sigCount[b.skuSig];
   });
-  return labels;
-}
-function round2n(n) {
-  if (!Number.isFinite(n)) return "";
-  return (Math.round(n * 100) / 100).toFixed(2);
+  return boxes;
 }
 function barcodeApi() {
   return window.JsBarcode || window.jsbarcode;
@@ -748,109 +786,161 @@ function qrApi() {
   const q = window.QRCode || (window.qrcode && window.qrcode.default) || window.qrcode;
   if (q && typeof q.toDataURL === "function") return q;
   if (q && q.default && typeof q.default.toDataURL === "function") return q.default;
-  return null;
+  return q;
 }
-function canvasToDataUrl(text) {
+function genBarcodeImg(text) {
   const api = barcodeApi();
-  if (!api) return "";
+  if (!api) return null;
   const safe = String(text || "A71").replace(/[^\x20-\x7E]/g, "-");
   const c = document.createElement("canvas");
-  api(c, safe, { format: "CODE128", displayValue: false, margin: 0, height: 42, width: 1.4 });
-  return c.toDataURL("image/png");
+  api(c, safe, { format: "CODE128", displayValue: true, fontSize: 16, height: 50, margin: 2, width: 2 });
+  return { url: c.toDataURL("image/png"), w: c.width, h: c.height };
 }
-async function qrDataUrl(text) {
+async function genQrImg(text) {
   const api = qrApi();
   if (!api) return "";
-  return api.toDataURL(String(text || "A71"), { margin: 0, width: 240, errorCorrectionLevel: "M" });
+  const payload = String(text || "A71");
+  try {
+    if (typeof api.toDataURL === "function") {
+      const url = api.toDataURL(payload, { margin: 1, width: 220, errorCorrectionLevel: "M" });
+      return url && typeof url.then === "function" ? await url : url;
+    }
+    if (typeof api === "function") {
+      const box = document.createElement("div");
+      box.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:220px;height:220px";
+      document.body.appendChild(box);
+      new api(box, { text: payload, width: 220, height: 220, colorDark: "#000000", colorLight: "#ffffff", correctLevel: api.CorrectLevel ? api.CorrectLevel.M : 0 });
+      await new Promise(r => setTimeout(r, 0));
+      const cv = box.querySelector("canvas");
+      const img = box.querySelector("img");
+      const url = cv ? cv.toDataURL("image/png") : (img ? img.src : "");
+      document.body.removeChild(box);
+      return url;
+    }
+  } catch (e) {}
+  return "";
 }
-function drawLabelPage(doc, lab, meta, inv, brandCode) {
-  const w = 100, h = 100;
-  const ink = [0, 0, 0];
-  doc.setDrawColor(0);
-  doc.setLineWidth(0.35);
-  doc.rect(1.2, 1.2, w - 2.4, h - 2.4);
-  doc.line(1.2, 14.6, w - 1.2, 14.6);
-  doc.line(34.2, 1.2, 34.2, 14.6);
-  doc.line(67.2, 1.2, 67.2, 14.6);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6);
-  doc.text("COUNTRY", 17.1, 4.4, { align: "center" });
-  doc.text("PO", 50.7, 4.4, { align: "center" });
-  doc.text("BRAND", 83.6, 4.4, { align: "center" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text((meta.n ? meta.n + " " : "") + (meta.code || ""), 17.1, 11.6, { align: "center" });
-  doc.setFontSize(14);
-  doc.text(String(lab.row.po || ""), 50.7, 11.6, { align: "center" });
-  doc.text(String(brandCode || ""), 83.6, 11.6, { align: "center" });
-  doc.line(1.2, 20.2, w - 1.2, 20.2);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6);
-  doc.text("INVOICE", 50, 18.3, { align: "center" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text(String(inv || ""), 50, 27.2, { align: "center" });
-  doc.line(1.2, 30.2, w - 1.2, 30.2);
-  const qrX = 77.2, qrS = 21.4;
-  doc.rect(qrX, 30.2, w - 1.2 - qrX, 39.6);
-  doc.line(1.2, 41.8, qrX, 41.8);
-  doc.line(39.6, 30.2, 39.6, 41.8);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(5.5);
-  doc.text("SKU (QUANTITY)", 20.4, 33.4, { align: "center" });
-  doc.text("CARTONS OF SKU", 58.4, 33.4, { align: "center" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  const sku = String(lab.row.ho || "").trim();
-  const pcs = String(lab.row.perCarton || "").trim();
-  doc.text(sku + (pcs ? " (" + pcs + ")" : ""), 20.4, 39.4, { align: "center" });
-  doc.text(lab.skuNo + " / " + lab.skuTotal, 58.4, 39.4, { align: "center" });
-  const hasBb = String(lab.row.bestBefore || "").trim();
-  const hasBatch = String(lab.row.batch || "").trim();
-  doc.line(1.2, 47.6, qrX, 47.6);
-  doc.line(39.6, 41.8, 39.6, 55.2);
-  doc.line(1.2, 55.2, qrX, 55.2);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(5.5);
-  doc.text("BEST BEFORE", 20.4, 44.6, { align: "center" });
-  doc.text("BATCH", 58.4, 44.6, { align: "center" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text(fmtDateShort(hasBb) || " ", 20.4, 53.2, { align: "center" });
-  doc.text(hasBatch || " ", 58.4, 53.2, { align: "center" });
-  doc.line(1.2, 62.4, qrX, 62.4);
-  doc.line(26.6, 55.2, 26.6, 62.4);
-  doc.line(53.2, 55.2, 53.2, 62.4);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(5);
-  doc.text("Size Box", 13.9, 57.6, { align: "center" });
-  doc.text("GW", 39.9, 57.6, { align: "center" });
-  doc.text("NW", 65.2, 57.6, { align: "center" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.5);
-  doc.text(lab.size || "", 13.9, 61.2, { align: "center" });
-  doc.text(round2n(lab.gw), 39.9, 61.2, { align: "center" });
-  doc.text(round2n(lab.nw), 65.2, 61.2, { align: "center" });
-  doc.line(1.2, 84.2, w - 1.2, 84.2);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  const cons = String(meta.consignee || "");
-  if (cons) {
-    const lines = doc.splitTextToSize(cons, 90);
-    doc.text(lines.slice(0, 2), 50, 67.8, { align: "center" });
+const LABEL_W = 100, LABEL_H = 100;
+const LABEL_RH1 = 14, LABEL_RH2 = 5, LABEL_RH3 = 10, LABEL_BARCODE_H = 24;
+const LABEL_RH4 = 4, LABEL_SKU_DATA_H = 10, LABEL_SZROW = 6;
+function fitWrappedText(doc, text, maxWidth, maxHeight, maxFont, minFont) {
+  let fs = maxFont, lines = [text], lineH = maxFont * 0.42;
+  while (fs >= minFont) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fs);
+    lines = doc.splitTextToSize(text, maxWidth);
+    lineH = fs * 0.42;
+    if (lines.length * lineH <= maxHeight) return { fs, lines, lineH };
+    fs -= 0.5;
   }
-  doc.text(String(meta.name || ""), 50, 75.2, { align: "center" });
-  doc.text("MADE IN CHINA", 50, 82.2, { align: "center" });
-  const comment = String(lab.row.comments || lab.row.comment || "").trim();
-  if (comment) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.text(comment, 50, 88.0, { align: "center" });
+  doc.setFontSize(minFont);
+  lines = doc.splitTextToSize(text, maxWidth);
+  return { fs: minFont, lines, lineH: minFont * 0.42 };
+}
+function drawGuestLabel(doc, b, meta, inv, brandCode, qrUrl, barcode) {
+  const W = LABEL_W, H = LABEL_H;
+  doc.setDrawColor(15, 15, 15); doc.setLineWidth(0.6); doc.rect(0, 0, W, H);
+  const hl = (t, x, y, w, h, fs) => {
+    const f = fs || 6; doc.setFont("helvetica", "normal"); doc.setFontSize(f); doc.setTextColor(0, 0, 0);
+    const ah = f * 0.3528; doc.text(t, x + w / 2, y + h / 2 + ah / 2, { align: "center" });
+  };
+  const hLine = (y, x0, x1) => { doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.22); doc.line(x0 == null ? 0 : x0, y, x1 == null ? W : x1, y); };
+  const vl = (x, y0, y1) => { doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.22); doc.line(x, y0, x, y1); };
+  const lv = (t, x, y, w, h, sz) => {
+    const fs = sz || 11; doc.setFont("helvetica", "bold"); doc.setFontSize(fs); doc.setTextColor(0, 0, 0);
+    const ah = fs * 0.3528; doc.text(String(t == null ? "—" : t), x + w / 2, y + h / 2 + ah / 2, { align: "center" });
+  };
+  const RH1 = LABEL_RH1, RH2 = LABEL_RH2, RH3 = LABEL_RH3, BARCODE_H = LABEL_BARCODE_H, c3 = W / 3;
+  let cy = 0;
+  hl("COUNTRY", 0, cy, c3, RH1 * 0.45); hl("PO", c3, cy, c3, RH1 * 0.45); hl("BRAND", c3 * 2, cy, c3, RH1 * 0.45);
+  lv((meta.n ? meta.n + " " : "") + (meta.code || "—"), 0, cy, c3, RH1, 18);
+  lv(b.po, c3, cy, c3, RH1, 16);
+  lv(brandCode || "—", c3 * 2, cy, c3, RH1, 16);
+  vl(c3, cy, cy + RH1); vl(c3 * 2, cy, cy + RH1);
+  cy += RH1; hLine(cy);
+  hl("INVOICE", 0, cy, W, RH2);
+  cy += RH2; hLine(cy);
+  lv(inv || "—", 0, cy, W, RH3, 13);
+  cy += RH3; hLine(cy);
+  const qrS = 18, leftW = W - qrS - 2, qrX = W - qrS - 1, lc3 = leftW / 3, qrColTop = cy, RH4 = LABEL_RH4;
+  const singleSku = b.skus.length === 1;
+  const s0 = singleSku ? b.skus[0] : null;
+  const hasExtra = !!(singleSku && s0 && (s0.bestBefore || s0.batch));
+  const skuAreaW = singleSku ? lc3 * 2 : leftW;
+  const ROW1_H = hasExtra ? 8 : LABEL_SKU_DATA_H;
+  const ROW2_H = hasExtra ? 7 : 0;
+  const skuBlockH = ROW1_H + ROW2_H;
+  hl("SKU (QUANTITY)", 0, cy, skuAreaW, RH4, 5.5);
+  if (singleSku) hl("CARTONS OF SKU", lc3 * 2, cy, lc3, RH4, 5.5);
+  cy += RH4;
+  const skuText = b.skus.map(s => s.sku + " (" + s.qtyPer + ")").join("  -  ");
+  const padX = 2;
+  const fit = fitWrappedText(doc, skuText, skuAreaW - padX * 2, ROW1_H - 1, 10, 5);
+  doc.setTextColor(0, 0, 0);
+  const textBlockH = fit.lines.length * fit.lineH;
+  let ty = cy + (ROW1_H - textBlockH) / 2 + fit.lineH * 0.78;
+  fit.lines.forEach(line => { doc.text(line, padX + (skuAreaW - padX * 2) / 2, ty, { align: "center" }); ty += fit.lineH; });
+  if (singleSku) lv(b.cartonInGroup + " / " + b.totalInGroup, lc3 * 2, cy, lc3, ROW1_H, 10);
+  cy += ROW1_H;
+  if (hasExtra) {
+    hLine(cy, 0, leftW);
+    const titleH = ROW2_H * 0.4, dataH = ROW2_H * 0.6;
+    hl("BEST BEFORE", 0, cy, skuAreaW, titleH, 5.5);
+    hl("BATCH", skuAreaW, cy, lc3, titleH, 5.5);
+    hLine(cy + titleH, 0, leftW);
+    lv(s0.bestBefore || "—", 0, cy + titleH, skuAreaW, dataH, 10);
+    lv(s0.batch || "—", skuAreaW, cy + titleH, lc3, dataH, 10);
+    cy += ROW2_H;
+  }
+  hLine(cy, 0, leftW);
+  if (singleSku) vl(lc3 * 2, qrColTop + RH4, cy);
+  const szRowH = LABEL_SZROW, szTitleH = szRowH * 0.4, szDataH = szRowH * 0.6;
+  hl("Size Box", 0, cy, lc3, szTitleH, 5); hl("GW", lc3, cy, lc3, szTitleH, 5); hl("NW", lc3 * 2, cy, lc3, szTitleH, 5);
+  vl(lc3, cy, cy + szRowH); vl(lc3 * 2, cy, cy + szRowH);
+  hLine(cy + szTitleH, 0, leftW);
+  lv(b.L + "X" + b.W + "X" + b.H, 0, cy + szTitleH, lc3, szDataH, 6.5);
+  lv(Number(b.gross).toFixed(2), lc3, cy + szTitleH, lc3, szDataH, 6.5);
+  lv(Number(b.net).toFixed(2), lc3 * 2, cy + szTitleH, lc3, szDataH, 6.5);
+  cy += szRowH;
+  hLine(cy, 0, leftW);
+  vl(leftW, qrColTop, cy);
+  if (qrUrl) doc.addImage(qrUrl, "PNG", qrX, qrColTop + 1, qrS, qrS);
+  const consigneeY = cy;
+  const consigneeH = LABEL_H - (LABEL_RH1 + LABEL_RH2 + LABEL_RH3 + LABEL_BARCODE_H) - RH4 - skuBlockH - szRowH;
+  const originLines = (meta.lines || []).concat(["MADE IN CHINA"]);
+  if (originLines.length && consigneeH > 0) {
+    const n = originLines.length;
+    const rowH = consigneeH / n;
+    const baseFs = Math.min(8, Math.max(3.5, (rowH - 1) * 2.2));
+    doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+    originLines.forEach((line, li) => {
+      let fs = baseFs;
+      doc.setFontSize(fs);
+      while (fs > 3 && doc.getTextWidth(line) > W - 4) { fs -= 0.5; doc.setFontSize(fs); }
+      const oy = consigneeY + rowH * (li + 0.5) + (fs * 0.3528) / 2;
+      doc.text(line, W / 2, oy, { align: "center" });
+    });
+  }
+  const commentsText = (b.skus[0] && b.skus[0].comments) || "";
+  const barcodeTop = H - BARCODE_H;
+  let commentsH = 0;
+  if (commentsText) {
+    commentsH = 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(80, 80, 80);
+    doc.text(commentsText, W / 2, barcodeTop + commentsH * 0.65, { align: "center" });
+  }
+  doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.4); doc.line(0, barcodeTop, W, barcodeTop);
+  if (barcode && barcode.url) {
+    const maxW = W - 10, maxH = BARCODE_H - 8 - commentsH;
+    let tw = maxW, th = tw * (barcode.h / barcode.w);
+    if (th > maxH) { th = maxH; tw = th * (barcode.w / barcode.h); }
+    const bx = (W - tw) / 2, by = barcodeTop + commentsH + (BARCODE_H - commentsH - th) / 2 - 2;
+    doc.addImage(barcode.url, "PNG", bx, by, tw, th);
   }
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.5);
-  doc.text("N° " + lab.boxNo + " / " + lab.boxTotal, w - 3.2, h - 2.8, { align: "right" });
-  return { qrX, qrY: 31.0, qrS, barY: 89.2 };
+  doc.setTextColor(80, 80, 80);
+  doc.text("N° " + b.cartonNumber + " / " + b.boxTotal, W - 2, H - 2, { align: "right" });
 }
 async function exportPackPdf() {
   const { picked, bad } = pickedOfficialRows();
@@ -868,32 +958,29 @@ async function exportPackPdf() {
   }
   try {
     const labels = expandCartonLabels(picked);
-    if (!labels.length) { ask("没有可展开的箱数"); return; }
+    if (!labels.length) { ask("没有可展开的箱数（Quantity Cartons 需大于 0）"); return; }
+    labels.forEach(b => { b.boxTotal = labels.length; });
     const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
     const meta = countryMetaOf(countries[0] || picked[0].country);
     const brandCode = brandCodeOf(picked.map(r => r.brand).find(Boolean) || "");
-    const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
-    for (let i = 0; i < labels.length; i++) {
-      if (i) doc.addPage([100, 100], "portrait");
-      const lab = labels[i];
-      const pos = drawLabelPage(doc, lab, meta, inv, brandCode);
-      const codeText = [meta.n, inv, lab.boxNo + "/" + lab.boxTotal].filter(Boolean).join(" - ") || "A71";
-      try {
-        const qr = await qrDataUrl(codeText);
-        if (qr) doc.addImage(qr, "PNG", pos.qrX + 0.6, pos.qrY, pos.qrS - 1.2, pos.qrS - 1.2);
-      } catch (e) {}
-      try {
-        const bar = canvasToDataUrl(codeText);
-        if (bar) {
-          doc.addImage(bar, "PNG", 12, pos.barY, 76, 6.2);
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(6);
-          doc.text(codeText, 50, pos.barY + 8.2, { align: "center" });
-        }
-      } catch (e) {}
+    const MAX = 400;
+    const nChunks = Math.ceil(labels.length / MAX);
+    for (let chunk = 0; chunk < nChunks; chunk++) {
+      const start = chunk * MAX;
+      const end = Math.min(start + MAX, labels.length);
+      const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
+      for (let i = start; i < end; i++) {
+        if (i > start) doc.addPage([100, 100], "portrait");
+        const lab = labels[i];
+        const qr = await genQrImg(lab.qr);
+        const barcodeText = (meta.n ? meta.n + " - " : "") + (inv || "") + " - " + lab.cartonNumber + "/" + labels.length;
+        const bar = genBarcodeImg(barcodeText);
+        drawGuestLabel(doc, lab, meta, inv, brandCode, qr, bar);
+      }
+      const suffix = nChunks > 1 ? ("_parte" + (chunk + 1) + "de" + nChunks) : "";
+      const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
+      doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas" + suffix + ".pdf");
     }
-    const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
-    doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas.pdf");
   } catch (e) {
     ask(e.message || "导出 PDF 失败");
   }
