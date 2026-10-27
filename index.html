@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027pwd" />
+<link rel="stylesheet" href="srm.css?v=20261027btn" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -115,8 +115,8 @@
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="crypto-lib.js?v=20261027pwd"></script>
-<script src="grid.js?v=20261027pwd"></script>
+<script src="crypto-lib.js?v=20261027btn"></script>
+<script src="grid.js?v=20261027btn"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -858,12 +858,51 @@ function renderToolbar() {
   } else if (view === "history") {
     bar.innerHTML = "";
   } else {
-    bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>`;
+    const updateBtn = currentUser.isAdmin
+      ? `<button class="btn" id="btnUpdatePack">更新数据</button>`
+      : "";
+    bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` + updateBtn;
     const btn = document.getElementById("btnExportPack");
     if (btn) btn.onclick = exportPackLabels;
   }
   const addUser = document.getElementById("addUser");
   if (addUser) addUser.onclick = () => openUserModal(-1);
+  const upd = document.getElementById("btnUpdatePack");
+  if (upd) upd.onclick = updatePackingNow;
+}
+async function updatePackingNow() {
+  if (!currentUser.isAdmin) return;
+  const btn = document.getElementById("btnUpdatePack");
+  if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
+  show("正在拉取装箱明细，请稍候");
+  try {
+    const r = await fetch("/api/update-packing", { method: "POST" });
+    const text = await r.text();
+    let info = null;
+    try { info = JSON.parse(text); } catch (e) {}
+    if (!r.ok || !info || !info.ok) {
+      const msg = (info && info.error) || (r.status === 404 ? "当前不是本机服务，无法取数。请运行「启动发票号查询」后再点更新。" : "更新失败");
+      ask(msg);
+      return;
+    }
+    const packFile = await loadUserPack(currentUser.username);
+    const rec = readSession();
+    const payload = await unlockPack(packFile, rec && rec.password ? rec.password : document.getElementById("loginPass").value);
+    packing.columns = payload.packingColumns || packing.columns || [];
+    packing.rows = payload.packingRows || packing.rows || [];
+    packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
+    packing.history = payload.packingHistory || packing.history || [];
+    if (payload.users) users = { users: payload.users };
+    page = 1;
+    renderFilters();
+    redrawCurrentView();
+    show("已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条");
+  } catch (e) {
+    ask("无法连接本机更新服务。请先运行「启动发票号查询」。");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "更新数据"; }
+    setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 4000);
+  }
 }
 async function persistAll() {
   if (!currentUser.isAdmin) return;
