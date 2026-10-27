@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027xlsxstop" />
+<link rel="stylesheet" href="srm.css?v=20261027hdrblue" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027xlsxstop"></script>
-<script src="grid.js?v=20261027xlsxstop"></script>
+<script src="crypto-lib.js?v=20261027hdrblue"></script>
+<script src="grid.js?v=20261027hdrblue"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -578,6 +578,14 @@ async function exportPackLabels() {
     insertRowsBeforeTotals(ws, templateDataEnd + 1, extra);
     const lastData = startRow + picked.length - 1;
     const sumRow = templateDataEnd + 1 + extra;
+    const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0070C0" } };
+    const headerFont = { name: "宋体", size: 12, bold: true, color: { argb: "FF000000" } };
+    for (let c = 2; c <= 24; c++) {
+      const cell = ws.getRow(16).getCell(c);
+      cell.fill = headerFill;
+      cell.font = Object.assign({}, cell.font || {}, headerFont);
+      if (cell.alignment) cell.alignment = Object.assign({}, cell.alignment, { wrapText: true, vertical: "middle", horizontal: "center" });
+    }
     const srcRow = ws.getRow(startRow);
     const dataFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
     const dataFont = { color: { argb: "FF000000" } };
