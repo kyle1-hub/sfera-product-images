@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028fetched" />
+<link rel="stylesheet" href="srm.css?v=20261028packtype" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028fetched"></script>
-<script src="grid.js?v=20261028fetched"></script>
+<script src="crypto-lib.js?v=20261028packtype"></script>
+<script src="grid.js?v=20261028packtype"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -201,7 +201,7 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "品牌", "动作", "变更字段"];
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "动作", "变更字段"];
 let packSelected = new Set();
 function scopedHistoryRows() {
   const rows = packing.history || [];
@@ -275,7 +275,7 @@ function filterCols() {
     const allow = ["发票号", "PO", "HO", "供应商", "动作", "变更字段"];
     return HISTORY_COLS.filter(c => allow.includes(c.label));
   }
-  const allow = ["发票号", "装箱号", "PO", "HO", "数量类型", "品牌", "供应商", "国家"];
+  const allow = ["发票号", "装箱号", "PO", "HO", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
   return packCols().filter(c => allow.includes(c.label));
 }
 function filteredUsers() {
@@ -600,16 +600,18 @@ async function exportPackLabels() {
     const brands = [...new Set(picked.map(r => String(r.brand || "").trim()).filter(Boolean))];
     if (brands[0]) ws.getCell("Q9").value = brands[0];
     const cols = ["D","E","F","G","H","J","K","L","M","N","O","P","Q"];
+    const mixedChild = (row) => String(row.packType || "").includes("混装子");
     picked.forEach((row, i) => {
       const r = startRow + i;
+      const mixed = mixedChild(row);
       const vals = {
         D: row.po || "",
-        E: numVal(row.qtp),
-        F: numVal(row.packlong),
-        G: numVal(row.packwidth),
-        H: numVal(row.packhigh),
-        J: numVal(row.gross),
-        K: numVal(row.net),
+        E: mixed ? "" : numVal(row.qtp),
+        F: mixed ? "" : numVal(row.packlong),
+        G: mixed ? "" : numVal(row.packwidth),
+        H: mixed ? "" : numVal(row.packhigh),
+        J: mixed ? "" : numVal(row.gross),
+        K: mixed ? "" : numVal(row.net),
         L: row.supplierCode || "",
         M: row.ho || "",
         N: row.ean || "",
@@ -625,12 +627,15 @@ async function exportPackLabels() {
         cell.fill = dataFill;
       });
       const iCell = ws.getCell("I" + r);
-      iCell.value = { formula: "F" + r + "*G" + r + "*H" + r + "*E" + r + "*0.000001" };
-      iCell.numFmt = "0.00";
+      if (mixed) iCell.value = null;
+      else {
+        iCell.value = { formula: "F" + r + "*G" + r + "*H" + r + "*E" + r + "*0.000001" };
+        iCell.numFmt = "0.00";
+      }
       iCell.font = dataFont;
       iCell.fill = dataFill;
       const rCell = ws.getCell("R" + r);
-      rCell.value = { formula: "Q" + r + "*E" + r };
+      rCell.value = mixed ? null : { formula: "Q" + r + "*E" + r };
       rCell.font = dataFont;
       rCell.fill = dataFill;
     });
