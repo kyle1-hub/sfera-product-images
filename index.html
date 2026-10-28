@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028login" />
+<link rel="stylesheet" href="srm.css?v=20261028fullhdr" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028login"></script>
-<script src="grid.js?v=20261028login"></script>
+<script src="crypto-lib.js?v=20261028fullhdr"></script>
+<script src="grid.js?v=20261028fullhdr"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1508,6 +1508,8 @@ async function tryLogin(fromSaved) {
     packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
     packing.history = payload.packingHistory || packing.history || [];
     if (payload.users) users = { users: payload.users };
+    packWidths = [];
+    histWidths = [];
     fillUserAudit();
     try { localStorage.removeItem("invoice.users"); } catch (e) {}
     saveSession(username, password);

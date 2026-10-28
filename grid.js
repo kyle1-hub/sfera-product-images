@@ -24,22 +24,27 @@ const COL_W = {
   变更字段: 140,
   原值: 180,
   新值: 180,
-  "Quantity Cartons": 120,
-  "Carton size (cm) (LxWxH)": 170,
-  CBM: 80,
-  Gross: 80,
-  Net: 80,
-  "Supplier Code": 120,
-  "EAN Code": 130,
-  CE: 70,
-  Description: 260,
-  "Quantity (Pieces per Carton)": 160,
-  "Total Quantity Pieces": 150,
+  "Quantity Cartons": 150,
+  "Carton size (cm) (LxWxH)": 220,
+  CBM: 88,
+  Gross: 88,
+  Net: 88,
+  "Supplier Code": 140,
+  "EAN Code": 140,
+  CE: 72,
+  Description: 280,
+  "Quantity (Pieces per Carton)": 230,
+  "Total Quantity Pieces": 190,
 };
 function defaultWidth(label) {
-  if (COL_W[label]) return COL_W[label];
-  const n = String(label || "").length;
-  return Math.min(180, Math.max(72, 14 * n + 24));
+  const s = String(label || "");
+  let textW = 0;
+  for (let i = 0; i < s.length; i++) {
+    textW += /[一-鿿]/.test(s[i]) ? 14 : 8.6;
+  }
+  const needed = Math.ceil(textW + 52);
+  const preset = COL_W[s] || 0;
+  return Math.min(360, Math.max(preset, needed, 72));
 }
 function applyColgroup(table, widths) {
   let cg = table.querySelector("colgroup");

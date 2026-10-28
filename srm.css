@@ -165,7 +165,7 @@ th {
   position: sticky; top: 0; white-space: nowrap; z-index: 1;
   overflow: visible;
 }
-th .th-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 26px); vertical-align: middle; }
+th .th-label { display: inline-block; overflow: visible; text-overflow: clip; max-width: none; vertical-align: middle; white-space: nowrap; }
 .th-filter {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   width: 16px; height: 16px; padding: 0; z-index: 6;
