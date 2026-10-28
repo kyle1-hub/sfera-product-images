@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028skillbtn" />
+<link rel="stylesheet" href="srm.css?v=20261028queue" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028skillbtn"></script>
-<script src="grid.js?v=20261028skillbtn"></script>
+<script src="crypto-lib.js?v=20261028queue"></script>
+<script src="grid.js?v=20261028queue"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1282,13 +1282,18 @@ async function updatePackingNow() {
       ask("本机更新服务还没起来。请先打开 Alpha Code，等开机自动启动完成后再点。");
       return;
     }
-    await fetch(LOCAL_API + "/api/request-packing", { method: "POST" });
+    const q = await fetch(LOCAL_API + "/api/request-packing", { method: "POST" });
+    const queued = await q.json().catch(() => null);
+    if (q.ok && queued && queued.queued) {
+      ask("已排队。请在 Alpha Code 对话里说「更新装箱明细」，取数完成后网站会自动刷新。");
+      return;
+    }
     const r = await fetch(LOCAL_API + "/api/update-packing", { method: "POST" });
     const text = await r.text();
     let info = null;
     try { info = JSON.parse(text); } catch (e) {}
     if (!r.ok || !info || !info.ok) {
-      const msg = (info && info.error) || "更新失败。请在 Alpha Code 对话里说「更新装箱明细」后再点一次。";
+      const msg = (info && info.error) || "请在 Alpha Code 对话里说「更新装箱明细」。";
       ask(msg);
       return;
     }
