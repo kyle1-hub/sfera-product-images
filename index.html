@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028packtype" />
+<link rel="stylesheet" href="srm.css?v=20261028newacct" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028packtype"></script>
-<script src="grid.js?v=20261028packtype"></script>
+<script src="crypto-lib.js?v=20261028newacct"></script>
+<script src="grid.js?v=20261028newacct"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1308,6 +1308,7 @@ async function updatePackingNow() {
     renderFilters();
     redrawCurrentView();
     let tip = "已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条";
+    if (info.newAccounts && info.newAccounts.length) tip += "，新建工厂账号 " + info.newAccounts.length + " 个";
     if (info.published === "pushed") tip += "，已发布到网站";
     else if (info.published === "no-change") tip += "，网站数据无变化";
     show(tip);
