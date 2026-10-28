@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028retry" />
+<link rel="stylesheet" href="srm.css?v=20261028skillbtn" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028retry"></script>
-<script src="grid.js?v=20261028retry"></script>
+<script src="crypto-lib.js?v=20261028skillbtn"></script>
+<script src="grid.js?v=20261028skillbtn"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1271,7 +1271,7 @@ async function updatePackingNow() {
   if (!currentUser.isAdmin) return;
   const btn = document.getElementById("btnUpdatePack");
   if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
-  show("正在拉取装箱明细，请稍候");
+  show("正在用装箱明细取数，请稍候");
   try {
     let pingOk = false;
     try {
@@ -1279,15 +1279,16 @@ async function updatePackingNow() {
       pingOk = ping.ok;
     } catch (e) { pingOk = false; }
     if (!pingOk) {
-      ask("本机更新服务还没起来。请先打开 Alpha Code 并确认已登录，稍等后再点更新数据。");
+      ask("本机更新服务还没起来。请先打开 Alpha Code，等开机自动启动完成后再点。");
       return;
     }
+    await fetch(LOCAL_API + "/api/request-packing", { method: "POST" });
     const r = await fetch(LOCAL_API + "/api/update-packing", { method: "POST" });
     const text = await r.text();
     let info = null;
     try { info = JSON.parse(text); } catch (e) {}
     if (!r.ok || !info || !info.ok) {
-      const msg = (info && info.error) || "更新失败";
+      const msg = (info && info.error) || "更新失败。请在 Alpha Code 对话里说「更新装箱明细」后再点一次。";
       ask(msg);
       return;
     }
