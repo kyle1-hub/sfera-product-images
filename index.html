@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028newacct" />
+<link rel="stylesheet" href="srm.css?v=20261028pwd" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028newacct"></script>
-<script src="grid.js?v=20261028newacct"></script>
+<script src="crypto-lib.js?v=20261028pwd"></script>
+<script src="grid.js?v=20261028pwd"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1334,11 +1334,58 @@ async function persistAll() {
     console.error(e);
   }
 }
-async function publishVault() { return persistAll(); }
+async function saveUsersToLocal() {
+  if (!currentUser.isAdmin && !currentUser.username) return false;
+  fillUserAudit();
+  try {
+    const ping = await fetch(LOCAL_API + "/api/ping", { cache: "no-store" });
+    if (!ping.ok) throw new Error("本机服务未开");
+    const r = await fetch(LOCAL_API + "/api/save-users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        users: currentUser.isAdmin
+          ? users.users
+          : (users.users || []).filter(u => String(u.username || "").toUpperCase() === String(currentUser.username || "").toUpperCase()),
+      }),
+    });
+    const info = await r.json().catch(() => null);
+    if (!r.ok || !info || !info.ok) {
+      ask((info && info.error) || "保存账号失败，请确认本机更新服务已启动");
+      return false;
+    }
+    if (info.publishError) ask("账号已保存，但发布网站失败：" + info.publishError);
+    return true;
+  } catch (e) {
+    ask("保存账号失败。请确认本机更新服务已启动后再试。");
+    return false;
+  }
+}
+async function publishVault() {
+  if (currentUser.isAdmin) await saveUsersToLocal();
+  return persistAll();
+}
+function openChangePassword() {
+  modalKind = "password";
+  modalIndex = -1;
+  document.getElementById("modalTitle").textContent = "改密码";
+  document.getElementById("modalForm").innerHTML = `
+    <div class="item"><label>原密码</label><input id="f_old" type="password" /></div>
+    <div class="item"><label>新密码</label><input id="f_new" type="password" /></div>
+    <div class="item"><label>再输入</label><input id="f_new2" type="password" /></div>
+  `;
+  document.getElementById("modal").classList.add("on");
+}
 function opsHtml(kind, i) {
+  const u = users.users[i] || {};
+  const uname = String(u.username || "").toUpperCase();
+  const reset = (uname && uname !== "ADMIN")
+    ? `<button class="icon-btn" title="重置密码为111111" data-op="reset" data-kind="${kind}" data-i="${i}">↻</button>`
+    : "";
   return `<div class="ops">
     <button class="icon-btn" title="新增" data-op="add" data-kind="${kind}" data-i="${i}">＋</button>
     <button class="icon-btn" title="修改" data-op="edit" data-kind="${kind}" data-i="${i}">✎</button>
+    ${reset}
     <button class="icon-btn danger" title="删除" data-op="del" data-kind="${kind}" data-i="${i}">🗑</button>
   </div>`;
 }
@@ -1375,6 +1422,19 @@ function bindOps() {
       const i = Number(btn.dataset.i);
       if (op === "add") openUserModal(-1);
       else if (op === "edit") openUserModal(i);
+      else if (op === "reset") {
+        const u = users.users[i];
+        if (!u || String(u.username || "").toUpperCase() === "ADMIN") return;
+        ask("确定把 " + (u.username || "") + " 的密码重置为 111111 吗？", async () => {
+          u.password = "111111";
+          u.updatedBy = operatorName();
+          u.updatedAt = nowText();
+          renderUsers();
+          show("正在重置并发布…");
+          const ok = await saveUsersToLocal();
+          if (ok) show("已重置为 111111，工厂用新密码重新登录即可");
+        });
+      }
       else if (op === "del") {
         ask("确定删除这条记录吗？", () => {
           users.users.splice(i, 1);
@@ -1409,12 +1469,52 @@ function ask(text, onOk) {
 }
 document.getElementById("modalCancel").onclick = () => document.getElementById("modal").classList.remove("on");
 document.getElementById("modalX").onclick = () => document.getElementById("modal").classList.remove("on");
-document.getElementById("modalOk").onclick = () => {
+document.getElementById("modalOk").onclick = async () => {
+  if (modalKind === "password") {
+    const rec = readSession() || {};
+    const oldPwd = document.getElementById("f_old").value;
+    const neu = document.getElementById("f_new").value.trim();
+    const neu2 = document.getElementById("f_new2").value.trim();
+    if (!neu) { ask("请输入新密码"); return; }
+    if (neu !== neu2) { ask("两次新密码不一致"); return; }
+    if (oldPwd !== String(rec.password || document.getElementById("loginPass").value || "")) {
+      ask("原密码不对");
+      return;
+    }
+    const uname = String(currentUser.username || "").toUpperCase();
+    let hit = (users.users || []).find(u => String(u.username || "").toUpperCase() === uname);
+    if (!hit) {
+      hit = {
+        username: uname,
+        name: currentUser.name || uname,
+        password: neu,
+        createdBy: uname,
+        createdAt: nowText(),
+        updatedBy: uname,
+        updatedAt: nowText(),
+      };
+      users.users = users.users || [];
+      users.users.push(hit);
+    } else {
+      hit.password = neu;
+      hit.updatedBy = uname;
+      hit.updatedAt = nowText();
+    }
+    document.getElementById("modal").classList.remove("on");
+    show("正在保存新密码…");
+    const ok = await saveUsersToLocal();
+    if (ok) {
+      saveSession(uname, neu);
+      document.getElementById("loginPass").value = neu;
+      show("密码已改，下次请用新密码登录");
+    }
+    return;
+  }
   if (modalKind !== "user") return;
   const rec = {
     username: document.getElementById("f_username").value.trim().toUpperCase(),
     name: document.getElementById("f_name").value.trim(),
-    password: document.getElementById("f_password").value.trim(),
+    password: document.getElementById("f_password").value.trim() || "111111",
   };
   const who = operatorName();
   const t = nowText();
@@ -1430,6 +1530,9 @@ document.getElementById("modalOk").onclick = () => {
     rec.createdAt = users.users[modalIndex].createdAt || t;
     rec.updatedBy = who;
     rec.updatedAt = t;
+    if (!document.getElementById("f_password").value.trim()) {
+      rec.password = users.users[modalIndex].password;
+    }
     users.users[modalIndex] = rec;
   }
   renderUsers();
@@ -1460,8 +1563,10 @@ function afterLogin() {
   document.getElementById("app").style.display = "grid";
   document.getElementById("who").innerHTML =
     (currentUser.name || currentUser.username) +
+    '　<button type="button" class="btn btn-text" id="btnPwd">改密码</button>' +
     '　<button type="button" class="btn btn-text" id="btnReload">刷新</button>' +
     '　<button type="button" class="btn btn-text" id="btnOut">退出</button>';
+  document.getElementById("btnPwd").onclick = openChangePassword;
   document.getElementById("btnReload").onclick = reloadView;
   document.getElementById("btnOut").onclick = () => {
     clearSession();
@@ -1514,6 +1619,17 @@ async function tryLogin(fromSaved) {
     packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
     packing.history = payload.packingHistory || packing.history || [];
     if (payload.users) users = { users: payload.users };
+    else {
+      users = { users: [{
+        username: currentUser.username,
+        name: currentUser.name || currentUser.username,
+        password: password,
+        createdBy: currentUser.username,
+        createdAt: nowText(),
+        updatedBy: currentUser.username,
+        updatedAt: nowText(),
+      }] };
+    }
     packWidths = [];
     histWidths = [];
     fillUserAudit();
