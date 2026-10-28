@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261027cbmfx" />
+<link rel="stylesheet" href="srm.css?v=20261028login" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -16,7 +16,7 @@
       <div class="item"><label>用户名</label><input id="loginUser" autocomplete="username" /></div>
       <div class="item"><label>密码</label><input id="loginPass" type="password" autocomplete="current-password" /></div>
       <div class="err" id="loginErr"></div>
-      <button type="button" class="btn" id="btnLogin" style="width:100%">登录</button>
+      <button type="button" class="btn" id="btnLogin" style="width:100%" onclick="window.doLogin && window.doLogin()">登录</button>
     </div>
   </div>
 </div>
@@ -114,12 +114,12 @@
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="lib/exceljs.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261027cbmfx"></script>
-<script src="grid.js?v=20261027cbmfx"></script>
+<script src="crypto-lib.js?v=20261028login"></script>
+<script src="grid.js?v=20261028login"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1481,14 +1481,22 @@ async function loadUserPack(username) {
 }
 async function tryLogin(fromSaved) {
   const err = document.getElementById("loginErr");
+  const btn = document.getElementById("btnLogin");
   err.textContent = "";
   const username = document.getElementById("loginUser").value.trim().toUpperCase();
   const password = document.getElementById("loginPass").value.trim();
   document.getElementById("loginUser").value = username;
   if (!username) { err.textContent = "请输入用户名"; return; }
   if (!password) { err.textContent = "请输入密码"; return; }
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "登录中…";
+  err.textContent = "正在验证账号，请稍候";
+  await new Promise(r => setTimeout(r, 30));
   try {
     const pack = await loadUserPack(username);
+    err.textContent = "正在打开数据包…";
+    await new Promise(r => setTimeout(r, 20));
     const payload = await unlockPack(pack, password);
     currentUser = {
       username: payload.username,
@@ -1511,10 +1519,15 @@ async function tryLogin(fromSaved) {
       document.getElementById("app").style.display = "none";
     }
     err.textContent = e.message || "登录失败";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev || "登录";
   }
 }
+window.doLogin = () => tryLogin(false);
 document.getElementById("btnLogin").onclick = () => tryLogin(false);
 document.getElementById("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(false); });
+document.getElementById("loginUser").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(false); });
 function restoreSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
   try {
