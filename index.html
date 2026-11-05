@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261028pwd" />
+<link rel="stylesheet" href="srm.css?v=20261105fix" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261028pwd"></script>
-<script src="grid.js?v=20261028pwd"></script>
+<script src="crypto-lib.js?v=20261105fix"></script>
+<script src="grid.js?v=20261105fix"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -141,13 +141,12 @@ const HISTORY_COLS = [
 const USER_COLS = [
   { key: "name", label: "供应商" },
   { key: "username", label: "用户名" },
-  { key: "password", label: "密码" },
   { key: "createdBy", label: "创建人" },
   { key: "createdAt", label: "创建时间" },
   { key: "updatedBy", label: "修改人" },
   { key: "updatedAt", label: "修改时间" },
 ];
-let userWidths = [88, 280, 100, 100, 88, 150, 88, 150];
+let userWidths = [88, 280, 100, 88, 150, 88, 150];
 let view = "pack";
 let currentUser = { username: "", name: "", isAdmin: false };
 const SESSION_KEY = "invoice.session";
@@ -403,7 +402,6 @@ function fillPager(elId, total) {
   el.querySelector(".pageSize").onchange = (e) => {
     pageSize = Number(e.target.value) || 100;
     page = 1;
-    packSelected = new Set();
     redrawCurrentView();
   };
   el.querySelectorAll(".pg").forEach(btn => {
@@ -412,13 +410,19 @@ function fillPager(elId, total) {
       if (btn.dataset.p === "prev") page = Math.max(1, page - 1);
       else if (btn.dataset.p === "next") page = Math.min(pages, page + 1);
       else if (btn.dataset.n) page = Number(btn.dataset.n);
-      packSelected = new Set();
       redrawCurrentView();
     };
   });
 }
 function isOfficialQty(row) {
   return String(row.qtyType || "").trim() === "正式";
+}
+function rowKey(row, fallback) {
+  const g = String((row && (row.gicode || row.packlistgicode)) || "").trim();
+  if (g) return "g:" + g;
+  const id = String((row && row.id) || "").trim();
+  if (id) return "id:" + id;
+  return "x:" + String(fallback || "");
 }
 function renderPack() {
   const cols = packCols();
@@ -444,10 +448,10 @@ function renderPack() {
     empty.hidden = true;
     document.getElementById("pbody").innerHTML = slice.map((row, i) => {
       const n = start + i + 1;
-      const id = row.id || ("idx-" + n);
-      const checked = packSelected.has(id) ? "checked" : "";
+      const key = rowKey(row, n);
+      const checked = packSelected.has(key) ? "checked" : "";
       return "<tr>" +
-        `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(id)}" ${checked} /></td>` +
+        `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(key)}" ${checked} /></td>` +
         `<td class="num">${n}</td>` +
         cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") +
         "</tr>";
@@ -469,13 +473,17 @@ function renderPack() {
       if (chk.checked) packSelected.add(id);
       else packSelected.delete(id);
       syncPackCheckAll(slice);
+      renderToolbar();
     };
   });
   const all = document.getElementById("packCheckAll");
   if (all) {
     all.onchange = () => {
-      if (all.checked) slice.forEach(r => packSelected.add(r.id));
-      else slice.forEach(r => packSelected.delete(r.id));
+      slice.forEach((r, i) => {
+        const key = rowKey(r, start + i + 1);
+        if (all.checked) packSelected.add(key);
+        else packSelected.delete(key);
+      });
       renderPack();
     };
     syncPackCheckAll(slice);
@@ -483,12 +491,13 @@ function renderPack() {
   const t = packing.fetchedAt || "";
   const el = document.getElementById("packTime");
   if (el) el.textContent = t ? "数据更新时间：" + t : "";
+  updatePackSelCount();
 }
 function syncPackCheckAll(rows) {
   const all = document.getElementById("packCheckAll");
   if (!all) return;
   const list = rows && rows.length != null ? rows : filteredPackList();
-  const n = list.filter(r => packSelected.has(r.id)).length;
+  const n = list.filter((r, i) => packSelected.has(rowKey(r, (page - 1) * pageSize + i + 1))).length;
   all.checked = list.length > 0 && n === list.length;
   all.indeterminate = n > 0 && n < list.length;
 }
@@ -643,9 +652,10 @@ async function exportPackLabels() {
         ws.getCell("R" + r).value = null;
       }
     }
-    const nSum = (key) => picked.reduce((s, row) => s + (Number(numVal(row[key])) || 0), 0);
+    const mains = picked.filter(row => !mixedChild(row));
+    const nSum = (key) => mains.reduce((s, row) => s + (Number(numVal(row[key])) || 0), 0);
     const sumE = nSum("qtp");
-    const sumI = picked.reduce((s, row) => {
+    const sumI = mains.reduce((s, row) => {
       const e = Number(numVal(row.qtp)) || 0;
       const L = Number(numVal(row.packlong)) || 0;
       const W = Number(numVal(row.packwidth)) || 0;
@@ -654,7 +664,7 @@ async function exportPackLabels() {
     }, 0);
     const sumJ = nSum("gross");
     const sumK = nSum("net");
-    const sumR = picked.reduce((s, row) => {
+    const sumR = mains.reduce((s, row) => {
       const e = Number(numVal(row.qtp)) || 0;
       const q = Number(numVal(row.perCarton)) || 0;
       return s + e * q;
@@ -728,18 +738,13 @@ function fmtDateShort(v) {
   }
   return s;
 }
-function currentPackPageRows() {
-  const rows = filteredPackList();
-  const start = (page - 1) * pageSize;
-  return rows.slice(start, start + pageSize);
-}
 function pickedOfficialRows() {
-  const start = (page - 1) * pageSize;
+  const list = filteredPackList();
   const picked = [];
   const bad = [];
-  currentPackPageRows().forEach((row, i) => {
-    if (!packSelected.has(row.id)) return;
-    const n = start + i + 1;
+  list.forEach((row, i) => {
+    if (!packSelected.has(rowKey(row, i + 1))) return;
+    const n = i + 1;
     if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
     else picked.push(row);
   });
@@ -760,16 +765,19 @@ function skuOf(row) {
 }
 function expandCartonLabels(picked) {
   const groups = [];
-  let cur = null;
+  const byInvPo = {};
   picked.forEach(row => {
     const qty = Math.max(0, Math.round(pNum(row.qtp)));
     const sku = String(row.ho || "").trim();
     const po = String(row.po || "").trim();
+    const inv = String(row.invoice || row.packnum || "").trim();
     if (!sku && !po && !qty) return;
     const skuObj = skuOf(row);
-    if (qty > 0 && sku) {
-      cur = {
+    const mixedChild = String(row.packType || "").includes("混装子");
+    if (qty > 0 && sku && !mixedChild) {
+      const g = {
         po,
+        inv,
         qty,
         L: pNum(row.packlong),
         W: pNum(row.packwidth),
@@ -779,9 +787,13 @@ function expandCartonLabels(picked) {
         net: pNum(row.net),
         skus: [skuObj],
       };
-      groups.push(cur);
-    } else if (cur && sku) {
-      cur.skus.push(skuObj);
+      groups.push(g);
+      const k = inv + "|" + po;
+      byInvPo[k] = g;
+    } else if (sku) {
+      const k = inv + "|" + po;
+      const host = byInvPo[k] || groups[groups.length - 1];
+      if (host) host.skus.push(skuObj);
     }
   });
   const boxes = [];
@@ -1084,7 +1096,6 @@ function redrawCurrentView() {
 }
 function refreshCurrentView() {
   page = 1;
-  packSelected = new Set();
   renderFilters();
   redrawCurrentView();
 }
@@ -1240,7 +1251,6 @@ function setView(name) {
   if (!currentUser.isAdmin && name !== "pack" && name !== "history") name = "pack";
   view = name;
   page = 1;
-  packSelected = new Set();
   document.getElementById("navUsers").classList.toggle("active", name === "users");
   document.getElementById("navPack").classList.toggle("active", name === "pack");
   document.getElementById("navHistory").classList.toggle("active", name === "history");
@@ -1267,16 +1277,27 @@ function renderToolbar() {
       ? `<button class="btn" id="btnUpdatePack">更新数据</button>`
       : "";
     bar.innerHTML = `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` +
-      `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>` + updateBtn;
+      `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>` + updateBtn +
+      `<span class="sel-count" id="packSelCount"></span>` +
+      `<button type="button" class="btn btn-plain" id="btnClearSel">清空勾选</button>`;
     const btn = document.getElementById("btnExportPack");
     if (btn) btn.onclick = exportPackLabels;
     const pdfBtn = document.getElementById("btnExportPdf");
     if (pdfBtn) pdfBtn.onclick = exportPackPdf;
+    const clr = document.getElementById("btnClearSel");
+    if (clr) clr.onclick = () => { packSelected = new Set(); renderPack(); };
+    updatePackSelCount();
   }
   const addUser = document.getElementById("addUser");
   if (addUser) addUser.onclick = () => openUserModal(-1);
   const upd = document.getElementById("btnUpdatePack");
   if (upd) upd.onclick = updatePackingNow;
+}
+function updatePackSelCount() {
+  const el = document.getElementById("packSelCount");
+  if (!el) return;
+  const n = packSelected.size;
+  el.textContent = n ? ("已选 " + n + " 行") : "";
 }
 const LOCAL_API = "http://127.0.0.1:8791";
 async function updatePackingNow() {
@@ -1353,7 +1374,15 @@ async function saveUsersToLocal() {
       body: JSON.stringify({
         users: currentUser.isAdmin
           ? users.users
-          : (users.users || []).filter(u => String(u.username || "").toUpperCase() === String(currentUser.username || "").toUpperCase()),
+          : (users.users || []).filter(u => String(u.username || "").toUpperCase() === String(currentUser.username || "").toUpperCase()).map(u => ({
+              username: u.username,
+              name: u.name,
+              password: u.password,
+              createdBy: u.createdBy,
+              createdAt: u.createdAt,
+              updatedBy: u.updatedBy,
+              updatedAt: u.updatedAt,
+            })),
       }),
     });
     const info = await r.json().catch(() => null);
@@ -1447,7 +1476,11 @@ function bindOps() {
           renderUsers();
           show("正在重置并发布…");
           const ok = await saveUsersToLocal();
-          if (ok) show("已重置，新密码：" + neu + "（请发给该工厂）");
+          if (ok) {
+            u.password = "";
+            renderUsers();
+            show("已重置，新密码：" + neu + "（请发给该工厂）");
+          }
         });
       }
       else if (op === "del") {
@@ -1466,10 +1499,11 @@ function openUserModal(i) {
   modalIndex = i;
   const u = i < 0 ? { username: "", name: "", password: "" } : users.users[i];
   document.getElementById("modalTitle").textContent = i < 0 ? "新增账号" : "修改账号";
+  const pwdHint = i < 0 ? `<div class="item"><label>密码</label><input id="f_password" placeholder="留空则自动生成 8 位" /></div>` : "";
   document.getElementById("modalForm").innerHTML = `
     <div class="item"><label>供应商</label><input id="f_name" value="${esc(u.name)}" /></div>
     <div class="item"><label>用户名</label><input id="f_username" value="${esc(u.username)}" /></div>
-    <div class="item"><label>密码</label><input id="f_password" value="${esc(u.password)}" /></div>
+    ${pwdHint}
   `;
   document.getElementById("modal").classList.add("on");
 }
@@ -1526,10 +1560,11 @@ document.getElementById("modalOk").onclick = async () => {
     return;
   }
   if (modalKind !== "user") return;
+  const pwdEl = document.getElementById("f_password");
   const rec = {
     username: document.getElementById("f_username").value.trim().toUpperCase(),
     name: document.getElementById("f_name").value.trim(),
-    password: document.getElementById("f_password").value.trim(),
+    password: pwdEl ? pwdEl.value.trim() : "",
   };
   const who = operatorName();
   const t = nowText();
@@ -1545,9 +1580,7 @@ document.getElementById("modalOk").onclick = async () => {
     rec.createdAt = users.users[modalIndex].createdAt || t;
     rec.updatedBy = who;
     rec.updatedAt = t;
-    if (!document.getElementById("f_password").value.trim()) {
-      rec.password = users.users[modalIndex].password;
-    }
+    rec.password = "";
     users.users[modalIndex] = rec;
   }
   renderUsers();

@@ -106,7 +106,7 @@ async function buildVault(columns, rows, users, packing) {
         return {
           username: un,
           name: x.name || "",
-          password: String(x.password || "").trim(),
+          password: "",
           createdBy: x.createdBy || un,
           createdAt: x.createdAt || "",
           updatedBy: x.updatedBy || un,

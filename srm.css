@@ -12,6 +12,12 @@
   --srm-blue: #3b82f6;
   --srm-danger: #ef4444;
 }
+.sel-count {
+  margin-left: 8px;
+  color: var(--srm-title);
+  font-weight: 600;
+  line-height: 32px;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
