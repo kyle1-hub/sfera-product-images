@@ -466,17 +466,17 @@ function renderPack() {
       const id = chk.dataset.id;
       if (chk.checked) packSelected.add(id);
       else packSelected.delete(id);
-      syncPackCheckAll(rows);
+      syncPackCheckAll(slice);
     };
   });
   const all = document.getElementById("packCheckAll");
   if (all) {
     all.onchange = () => {
-      if (all.checked) rows.forEach(r => packSelected.add(r.id));
-      else rows.forEach(r => packSelected.delete(r.id));
+      if (all.checked) slice.forEach(r => packSelected.add(r.id));
+      else slice.forEach(r => packSelected.delete(r.id));
       renderPack();
     };
-    syncPackCheckAll(rows);
+    syncPackCheckAll(slice);
   }
   const t = packing.fetchedAt || "";
   const el = document.getElementById("packTime");
@@ -485,7 +485,7 @@ function renderPack() {
 function syncPackCheckAll(rows) {
   const all = document.getElementById("packCheckAll");
   if (!all) return;
-  const list = rows || filteredPackList();
+  const list = rows && rows.length != null ? rows : filteredPackList();
   const n = list.filter(r => packSelected.has(r.id)).length;
   all.checked = list.length > 0 && n === list.length;
   all.indeterminate = n > 0 && n < list.length;
@@ -548,17 +548,11 @@ function templateCountry(v) {
   return hit ? drop[hit] : s;
 }
 async function exportPackLabels() {
-  const list = filteredPackList();
-  const picked = [];
-  const bad = [];
-  list.forEach((row, i) => {
-    if (!packSelected.has(row.id)) return;
-    const n = i + 1;
-    if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
-    else picked.push(row);
-  });
-  if (bad.length) { ask(bad.join("\n")); return; }
-  if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  const { picked, skipped } = pickedOfficialRows();
+  if (!picked.length) {
+    ask(skipped ? "勾选的明细都是预估，不能导出。请勾选数量类型为「正式」的行。" : "请先勾选要导出的装箱明细");
+    return;
+  }
   const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
   if (countries.length > 1) {
     ask("勾选的明细包含多个国家，请按同一国家导出");
@@ -734,14 +728,13 @@ function fmtDateShort(v) {
 function pickedOfficialRows() {
   const list = filteredPackList();
   const picked = [];
-  const bad = [];
-  list.forEach((row, i) => {
+  let skipped = 0;
+  list.forEach((row) => {
     if (!packSelected.has(row.id)) return;
-    const n = i + 1;
-    if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
+    if (!isOfficialQty(row)) skipped += 1;
     else picked.push(row);
   });
-  return { picked, bad };
+  return { picked, skipped };
 }
 function pNum(v) {
   const n = Number(String(v == null ? "" : v).replace(/,/g, "").trim());
@@ -977,9 +970,11 @@ function drawGuestLabel(doc, b, meta, inv, brandCode, qrUrl, barcode) {
   doc.text("N° " + b.cartonNumber + " / " + b.boxTotal, W - 2, H - 2, { align: "right" });
 }
 async function exportPackPdf() {
-  const { picked, bad } = pickedOfficialRows();
-  if (bad.length) { ask(bad.join("\n")); return; }
-  if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  const { picked, skipped } = pickedOfficialRows();
+  if (!picked.length) {
+    ask(skipped ? "勾选的明细都是预估，不能导出。请勾选数量类型为「正式」的行。" : "请先勾选要导出的装箱明细");
+    return;
+  }
   const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
   if (countries.length > 1) {
     ask("勾选的明细包含多个国家，请按同一国家导出");
