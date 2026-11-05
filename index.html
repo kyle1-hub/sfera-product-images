@@ -557,7 +557,7 @@ async function exportPackLabels() {
     if (!isOfficialQty(row)) bad.push("第" + n + "行【数量类型】为“" + (row.qtyType || "空") + "”，不允许导出");
     else picked.push(row);
   });
-  if (bad.length) { ask(bad.join("；")); return; }
+  if (bad.length) { ask(bad.join("\n")); return; }
   if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
   const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
   if (countries.length > 1) {
@@ -978,7 +978,7 @@ function drawGuestLabel(doc, b, meta, inv, brandCode, qrUrl, barcode) {
 }
 async function exportPackPdf() {
   const { picked, bad } = pickedOfficialRows();
-  if (bad.length) { ask(bad.join("；")); return; }
+  if (bad.length) { ask(bad.join("\n")); return; }
   if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
   const countries = [...new Set(picked.map(r => templateCountry(r.country)).filter(Boolean))];
   if (countries.length > 1) {
