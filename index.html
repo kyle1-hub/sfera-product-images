@@ -1425,14 +1425,22 @@ function bindOps() {
       else if (op === "reset") {
         const u = users.users[i];
         if (!u || String(u.username || "").toUpperCase() === "ADMIN") return;
-        ask("确定把 " + (u.username || "") + " 的密码重置为 111111 吗？", async () => {
-          u.password = "111111";
+        ask("确定重置 " + (u.username || "") + " 的密码吗？会生成一串 8 位新密码。", async () => {
+          const used = new Set((users.users || []).map(x => String(x.password || "")));
+          const alphabet = "abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+          let neu = "";
+          for (let t = 0; t < 40; t++) {
+            neu = "";
+            for (let k = 0; k < 8; k++) neu += alphabet[Math.floor(Math.random() * alphabet.length)];
+            if (!used.has(neu) && neu !== "111111") break;
+          }
+          u.password = neu;
           u.updatedBy = operatorName();
           u.updatedAt = nowText();
           renderUsers();
           show("正在重置并发布…");
           const ok = await saveUsersToLocal();
-          if (ok) show("已重置为 111111，工厂用新密码重新登录即可");
+          if (ok) show("已重置，新密码：" + neu + "（请发给该工厂）");
         });
       }
       else if (op === "del") {
@@ -1514,7 +1522,7 @@ document.getElementById("modalOk").onclick = async () => {
   const rec = {
     username: document.getElementById("f_username").value.trim().toUpperCase(),
     name: document.getElementById("f_name").value.trim(),
-    password: document.getElementById("f_password").value.trim() || "111111",
+    password: document.getElementById("f_password").value.trim(),
   };
   const who = operatorName();
   const t = nowText();
