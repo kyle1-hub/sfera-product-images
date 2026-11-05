@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261105fix" />
+<link rel="stylesheet" href="srm.css?v=20261105inv" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261105fix"></script>
-<script src="grid.js?v=20261105fix"></script>
+<script src="crypto-lib.js?v=20261105inv"></script>
+<script src="grid.js?v=20261105inv"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -558,6 +558,21 @@ function templateCountry(v) {
   const hit = Object.keys(drop).find(k => key.includes(k) || k.includes(key));
   return hit ? drop[hit] : s;
 }
+function invoiceKeyOf(row) {
+  return String((row && row.invoice) || "").trim();
+}
+function groupPickedByInvoice(picked) {
+  const map = new Map();
+  picked.forEach(row => {
+    const k = invoiceKeyOf(row);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(row);
+  });
+  return [...map.entries()].map(([invoice, rows]) => ({ invoice, rows }));
+}
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 async function exportPackLabels() {
   const { picked, bad } = pickedOfficialRows();
   if (bad.length) {
@@ -570,12 +585,24 @@ async function exportPackLabels() {
     ask("勾选的明细包含多个国家，请按同一国家导出");
     return;
   }
+  const groups = groupPickedByInvoice(picked);
   try {
     if (typeof ExcelJS === "undefined") throw new Error("导出组件未加载");
     const res = await fetch("A71-label-template.xlsx?t=" + Date.now());
     if (!res.ok) throw new Error("找不到箱贴模板");
+    const templateBuf = await res.arrayBuffer();
+    for (let gi = 0; gi < groups.length; gi++) {
+      if (gi) await sleep(400);
+      await writePackExcel(templateBuf, groups[gi].rows, groups[gi].invoice, countries[0]);
+    }
+    if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 Excel");
+  } catch (e) {
+    ask(e.message || "导出失败");
+  }
+}
+async function writePackExcel(templateBuf, picked, invoice, country) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(await res.arrayBuffer());
+    await wb.xlsx.load(templateBuf.slice(0));
     const ws = wb.getWorksheet("Template") || wb.worksheets[0];
     const startRow = 17;
     const templateDataEnd = 30;
@@ -600,9 +627,9 @@ async function exportPackLabels() {
       if (srcRow.height) row.height = srcRow.height;
       for (let c = 2; c <= 24; c++) cloneCellStyle(srcRow.getCell(c), row.getCell(c));
     }
-    const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
+    const inv = invoice || picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
     ws.getCell("Q6").value = inv;
-    if (countries[0]) ws.getCell("Q8").value = countries[0];
+    if (country) ws.getCell("Q8").value = country;
     const brands = [...new Set(picked.map(r => String(r.brand || "").trim()).filter(Boolean))];
     if (brands[0]) ws.getCell("Q9").value = brands[0];
     const cols = ["D","E","F","G","H","J","K","L","M","N","O","P","Q"];
@@ -685,13 +712,10 @@ async function exportPackLabels() {
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
+    const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "NO-INVOICE";
     a.download = shipNo + "-A71导箱贴文件.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
-  } catch (e) {
-    ask(e.message || "导出失败");
-  }
 }
 const COUNTRY_META = {
   ARGENTINA: { n: 1, code: "AR", name: "ARGENTINA", lines: ["VISION 101 S.A.", "ARGENTINA"] },
@@ -1007,31 +1031,40 @@ async function exportPackPdf() {
     ask("PDF 组件未加载，请刷新后再试");
     return;
   }
+  const groups = groupPickedByInvoice(picked);
   try {
-    const labels = expandCartonLabels(picked);
-    if (!labels.length) { ask("没有可展开的箱数（Quantity Cartons 需大于 0）"); return; }
-    labels.forEach(b => { b.boxTotal = labels.length; });
-    const inv = picked.map(r => String(r.invoice || "").trim()).find(Boolean) || "";
-    const meta = countryMetaOf(countries[0] || picked[0].country);
-    const brandCode = brandCodeOf(picked.map(r => r.brand).find(Boolean) || "");
-    const MAX = 400;
-    const nChunks = Math.ceil(labels.length / MAX);
-    for (let chunk = 0; chunk < nChunks; chunk++) {
-      const start = chunk * MAX;
-      const end = Math.min(start + MAX, labels.length);
-      const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
-      for (let i = start; i < end; i++) {
-        if (i > start) doc.addPage([100, 100], "portrait");
-        const lab = labels[i];
-        const qr = await genQrImg(lab.qr);
-        const barcodeText = (meta.n ? meta.n + " - " : "") + (inv || "") + " - " + lab.cartonNumber + "/" + labels.length;
-        const bar = genBarcodeImg(barcodeText);
-        drawGuestLabel(doc, lab, meta, inv, brandCode, qr, bar);
+    let made = 0;
+    for (let gi = 0; gi < groups.length; gi++) {
+      const rows = groups[gi].rows;
+      const inv = groups[gi].invoice;
+      const labels = expandCartonLabels(rows);
+      if (!labels.length) continue;
+      if (gi) await sleep(400);
+      labels.forEach(b => { b.boxTotal = labels.length; });
+      const meta = countryMetaOf(countries[0] || rows[0].country);
+      const brandCode = brandCodeOf(rows.map(r => r.brand).find(Boolean) || "");
+      const MAX = 400;
+      const nChunks = Math.ceil(labels.length / MAX);
+      for (let chunk = 0; chunk < nChunks; chunk++) {
+        const start = chunk * MAX;
+        const end = Math.min(start + MAX, labels.length);
+        const doc = new JsPDF({ unit: "mm", format: [100, 100], orientation: "portrait" });
+        for (let i = start; i < end; i++) {
+          if (i > start) doc.addPage([100, 100], "portrait");
+          const lab = labels[i];
+          const qr = await genQrImg(lab.qr);
+          const barcodeText = (meta.n ? meta.n + " - " : "") + (inv || "") + " - " + lab.cartonNumber + "/" + labels.length;
+          const bar = genBarcodeImg(barcodeText);
+          drawGuestLabel(doc, lab, meta, inv, brandCode, qr, bar);
+        }
+        const suffix = nChunks > 1 ? ("_parte" + (chunk + 1) + "de" + nChunks) : "";
+        const shipNo = inv || rows.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "NO-INVOICE";
+        doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas" + suffix + ".pdf");
       }
-      const suffix = nChunks > 1 ? ("_parte" + (chunk + 1) + "de" + nChunks) : "";
-      const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "A71";
-      doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas" + suffix + ".pdf");
+      made++;
     }
+    if (!made) { ask("没有可展开的箱数（Quantity Cartons 需大于 0）"); return; }
+    if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 PDF");
   } catch (e) {
     ask(e.message || "导出 PDF 失败");
   }
