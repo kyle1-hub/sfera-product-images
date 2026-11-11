@@ -26,20 +26,37 @@ async function deriveKey(password, salt) {
   );
 }
 
+async function gzipBytes(bytes) {
+  if (typeof CompressionStream === "undefined") return bytes;
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function gunzipBytes(bytes) {
+  if (typeof DecompressionStream === "undefined") throw new Error("浏览器不支持解压");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 async function encryptJson(obj, password) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(password, salt);
-  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(JSON.stringify(obj)));
-  return { salt: b64enc(salt), iv: b64enc(iv), data: b64enc(cipher) };
+  const zipped = await gzipBytes(te.encode(JSON.stringify(obj)));
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, zipped);
+  return { zip: 1, salt: b64enc(salt), iv: b64enc(iv), data: b64enc(cipher) };
 }
 
 async function decryptJson(pack, password) {
   const salt = b64dec(pack.salt);
   const iv = b64dec(pack.iv);
   const key = await deriveKey(password, salt);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, b64dec(pack.data));
-  return JSON.parse(td.decode(plain));
+  let plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, b64dec(pack.data));
+  const bytes = plain instanceof ArrayBuffer ? new Uint8Array(plain) : plain;
+  if (pack.zip) {
+    const unzipped = await gunzipBytes(bytes);
+    return JSON.parse(td.decode(unzipped));
+  }
+  return JSON.parse(td.decode(bytes));
 }
 
 function supplierField(columns) {

@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261111login" />
+<link rel="stylesheet" href="srm.css?v=20261111zip" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -118,8 +118,8 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261111login"></script>
-<script src="grid.js?v=20261111login"></script>
+<script src="crypto-lib.js?v=20261111zip"></script>
+<script src="grid.js?v=20261111zip"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 let users = { users: [] };
@@ -1696,7 +1696,7 @@ async function tryLogin(fromSaved) {
   const prev = btn.textContent;
   btn.disabled = true;
   btn.textContent = "登录中…";
-  err.textContent = isAdminUser(username) ? "正在下载管理员数据包（约 6MB），请稍候…" : "正在验证账号，请稍候";
+  err.textContent = isAdminUser(username) ? "正在下载管理员数据包，请稍候…" : "正在验证账号，请稍候";
   await new Promise(r => setTimeout(r, 30));
   try {
     const pack = await loadUserPack(username);
