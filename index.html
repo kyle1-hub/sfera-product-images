@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112s06d" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112s06d" />
+<link rel="stylesheet" href="srm.css?v=20261112s06e" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112s06e" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112s06d"></script>
-<script src="grid.js?v=20261112s06d"></script>
-<script src="s06-mark.js?v=20261112s06d"></script>
+<script src="crypto-lib.js?v=20261112s06e"></script>
+<script src="grid.js?v=20261112s06e"></script>
+<script src="s06-mark.js?v=20261112s06e"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -234,11 +234,25 @@ let filters = {};
 let page = 1;
 let pageSize = 100;
 const PAGE_SIZES = [50, 100, 500, 10000];
-function valOf(row, key) { return row[key] == null ? "" : String(row[key]); }
+function valOf(row, key) {
+  if (key === "layoutResult" && packKind === "s06") {
+    if (window.S06Mark && typeof S06Mark.layoutInfoFromRow === "function") {
+      return S06Mark.layoutInfoFromRow(row).text || "";
+    }
+    return "";
+  }
+  return row[key] == null ? "" : String(row[key]);
+}
 function packCols() {
   let cols = (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录" && c.key !== "supplierName" && c.label !== "供应商名称" && c.key !== "gicode" && c.label !== "装箱单明细内码");
   if (packKind === "s06") {
     cols = cols.filter(c => c.key !== "invoice" && c.label !== "发票号");
+    if (!cols.some(c => c.key === "layoutResult")) {
+      const idx = cols.findIndex(c => c.key === "cartonSize" || c.label === "Carton size (cm) (LxWxH)");
+      const col = { key: "layoutResult", label: "排版判定" };
+      if (idx >= 0) cols.splice(idx + 1, 0, col);
+      else cols.push(col);
+    }
   }
   return cols;
 }
@@ -246,7 +260,7 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "动作", "变更字段"];
+const DROPDOWN_LABELS = ["客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "排版判定", "动作", "变更字段"];
 let packSelected = new Set();
 let s06Confirmed = new Set();
 function scopedHistoryRows() {
@@ -322,7 +336,7 @@ function filterCols() {
     return HISTORY_COLS.filter(c => allow.includes(c.label));
   }
   const allow = packKind === "s06"
-    ? ["装箱号", "客户", "PO", "HO", "Range", "订单数量", "数量类型", "装箱类型", "品牌", "供应商", "国家"]
+    ? ["装箱号", "客户", "PO", "HO", "Range", "订单数量", "数量类型", "装箱类型", "品牌", "供应商", "国家", "排版判定"]
     : ["发票号", "装箱号", "客户", "PO", "HO", "Range", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
   return packCols().filter(c => allow.includes(c.label));
 }
@@ -502,7 +516,7 @@ function renderPack() {
       return "<tr>" +
         `<td class="num"><input type="checkbox" class="chk pack-chk" data-id="${esc(key)}" ${checked} /></td>` +
         `<td class="num">${n}</td>` +
-        cols.map(c => `<td title="${esc(row[c.key])}">${esc(row[c.key])}</td>`).join("") +
+        cols.map(c => `<td title="${esc(valOf(row, c.key))}">${esc(valOf(row, c.key))}</td>`).join("") +
         "</tr>";
     }).join("");
   }
@@ -1280,7 +1294,7 @@ function exportCurrentRows() {
   const cols = currentViewCols();
   const rows = view === "users" ? filteredUsers() : view === "history" ? filteredHistory() : filteredPackList();
   const header = cols.map(c => csvEscape(c.label)).join(",");
-  const body = rows.map(r => cols.map(c => csvEscape(r[c.key])).join(",")).join("\n");
+  const body = rows.map(r => cols.map(c => csvEscape(valOf(r, c.key))).join(",")).join("\n");
   const blob = new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

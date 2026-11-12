@@ -634,11 +634,23 @@
     return showPreview();
   }
 
+  function layoutInfoFromRow(row) {
+    var det = detectTemplate((row && (row.country || row.port)) || "");
+    var dims = rowDims(row || {});
+    var job = { tpl: det ? det.code : "", dims: dims, layout: "auto" };
+    var L = layoutOf(job);
+    var text = L === "2" ? "一开二 20×13" : L === "4" ? "一开四 13.9×9.6" : "待填尺寸";
+    if (det) text += " · " + det.faces + " 面";
+    else text += " · 未识别模板";
+    return { layout: L, tpl: det ? det.code : "", dest: det ? det.dest : "", faces: det ? det.faces : 0, text: text };
+  }
+
   global.S06Mark = {
     exportPdf: exportPdf,
     packingToJobs: packingToJobs,
     detectTemplate: detectTemplate,
     validateJobs: validateJobs,
-    review: review
+    review: review,
+    layoutInfoFromRow: layoutInfoFromRow
   };
 })(window);
