@@ -200,7 +200,7 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "动作", "变更字段"];
+const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "动作", "变更字段"];
 let packSelected = new Set();
 function scopedHistoryRows() {
   const rows = packing.history || [];
