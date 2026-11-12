@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112menu" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112menu" />
+<link rel="stylesheet" href="srm.css?v=20261112pwd" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112pwd" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112menu"></script>
-<script src="grid.js?v=20261112menu"></script>
-<script src="s06-mark.js?v=20261112menu"></script>
+<script src="crypto-lib.js?v=20261112pwd"></script>
+<script src="grid.js?v=20261112pwd"></script>
+<script src="s06-mark.js?v=20261112pwd"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -190,13 +190,14 @@ const PACK_MENU_DEFS = [
 const USER_COLS = [
   { key: "name", label: "供应商" },
   { key: "username", label: "用户名" },
+  { key: "password", label: "密码" },
   { key: "menusLabel", label: "菜单权限" },
   { key: "createdBy", label: "创建人" },
   { key: "createdAt", label: "创建时间" },
   { key: "updatedBy", label: "修改人" },
   { key: "updatedAt", label: "修改时间" },
 ];
-let userWidths = [88, 220, 100, 200, 88, 150, 88, 150];
+let userWidths = [88, 220, 100, 110, 200, 88, 150, 88, 150];
 let view = "pack";
 let currentUser = { username: "", name: "", isAdmin: false, menus: null };
 function allowedPackMenus() {
@@ -1712,7 +1713,7 @@ function openUserModal(i) {
   modalIndex = i;
   const u = i < 0 ? { username: "", name: "", password: "", menus: [] } : users.users[i];
   document.getElementById("modalTitle").textContent = i < 0 ? "新增账号" : "修改账号";
-  const pwdHint = i < 0 ? `<div class="item"><label>密码</label><input id="f_password" placeholder="留空则自动生成 8 位" /></div>` : "";
+  const pwdHint = `<div class="item"><label>密码</label><input id="f_password" value="${esc(u.password || "")}" placeholder="${i < 0 ? "留空则自动生成 8 位" : "可直接改"}" /></div>`;
   const adminLock = isAdminUser(u.username);
   const checked = userMenus(u);
   const menuBox = PACK_MENU_DEFS.map(m => {
@@ -1807,8 +1808,7 @@ document.getElementById("modalOk").onclick = async () => {
     rec.createdAt = users.users[modalIndex].createdAt || t;
     rec.updatedBy = who;
     rec.updatedAt = t;
-    rec.password = "";
-    rec.menus = rec.menus;
+    if (!rec.password) rec.password = users.users[modalIndex].password || "";
     users.users[modalIndex] = Object.assign({}, users.users[modalIndex], rec);
   }
   renderUsers();
