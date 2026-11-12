@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112pwd" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112pwd" />
+<link rel="stylesheet" href="srm.css?v=20261112hist" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112hist" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112pwd"></script>
-<script src="grid.js?v=20261112pwd"></script>
-<script src="s06-mark.js?v=20261112pwd"></script>
+<script src="crypto-lib.js?v=20261112hist"></script>
+<script src="grid.js?v=20261112hist"></script>
+<script src="s06-mark.js?v=20261112hist"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -138,6 +138,9 @@ function applyPackPayload(payload) {
   if (sets && (sets.a71 || sets.s06)) {
     packingSets.a71 = Object.assign(emptyPackSet(), sets.a71 || {});
     packingSets.s06 = Object.assign(emptyPackSet(), sets.s06 || {});
+    if (!(packingSets.a71.history || []).length && payload.packingHistory) {
+      packingSets.a71.history = payload.packingHistory;
+    }
   } else {
     packingSets.a71 = {
       columns: (payload && payload.packingColumns) || [],
@@ -173,6 +176,7 @@ let histWidths = [];
 const BLANK = "__BLANK__";
 const BLANK_LABEL = "<空白>";
 const HISTORY_COLS = [
+  { key: "packKindLabel", label: "类型" },
   { key: "at", label: "变更时间" },
   { key: "action", label: "动作" },
   { key: "invoice", label: "发票号" },
@@ -300,13 +304,23 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "排版判定", "动作", "变更字段"];
+const DROPDOWN_LABELS = ["类型", "客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "排版判定", "动作", "变更字段"];
 let packSelected = new Set();
 let s06Confirmed = new Set();
 function scopedHistoryRows() {
-  const rows = packing.history || [];
-  if (currentUser.isAdmin) return rows;
-  return rows.filter(r => rowVisibleTo(r, currentUser.username, [{ key: "supplier", label: "供应商" }]));
+  const allow = allowedPackMenus();
+  const chunks = [];
+  if (currentUser.isAdmin || allow.includes("a71")) {
+    (packingSets.a71.history || []).forEach(r => chunks.push(Object.assign({}, r, { packKindLabel: "A71" })));
+  }
+  if (currentUser.isAdmin || allow.includes("s06")) {
+    (packingSets.s06.history || []).forEach(r => chunks.push(Object.assign({}, r, { packKindLabel: "S06" })));
+  }
+  if (!chunks.length && (packing.history || []).length) {
+    (packing.history || []).forEach(r => chunks.push(Object.assign({}, r, { packKindLabel: PACK_KINDS[packKind] || "" })));
+  }
+  if (currentUser.isAdmin) return chunks;
+  return chunks.filter(r => rowVisibleTo(r, currentUser.username, [{ key: "supplier", label: "供应商" }]));
 }
 function sourceRowsForFilters() {
   if (view === "users") return users.users || [];
@@ -372,7 +386,7 @@ function filteredRows() {
 }
 function filterCols() {
   if (view === "history") {
-    const allow = ["发票号", "PO", "HO", "供应商", "动作", "变更字段"];
+    const allow = ["类型", "发票号", "PO", "HO", "供应商", "动作", "变更字段"];
     return HISTORY_COLS.filter(c => allow.includes(c.label));
   }
   const allow = packKind === "s06"
