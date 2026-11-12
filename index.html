@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261111zip" />
+<link rel="stylesheet" href="srm.css?v=20261112s06" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -25,7 +25,8 @@
     <div class="logo"><span>发</span>发票号查询</div>
     <nav class="menu">
       <a href="javascript:void(0)" id="navUsers">账号管控</a>
-      <a href="javascript:void(0)" class="active" id="navPack">装箱明细</a>
+      <a href="javascript:void(0)" class="active" id="navPack">A71-装箱明细</a>
+      <a href="javascript:void(0)" id="navPackS06">S06-装箱明细</a>
       <a href="javascript:void(0)" id="navHistory">历史日志</a>
     </nav>
   </aside>
@@ -52,7 +53,7 @@
         <div class="pager" id="userPager"></div>
       </div>
       <div class="card table-card" id="panelPack">
-        <div class="tabs"><span class="on">装箱明细</span><span class="pack-time" id="packTime"></span></div>
+        <div class="tabs"><span class="on" id="packTabLabel">A71-装箱明细</span><span class="pack-time" id="packTime"></span></div>
         <div class="table-wrap">
           <table>
             <thead id="phead"></thead>
@@ -118,10 +119,48 @@
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261111zip"></script>
-<script src="grid.js?v=20261111zip"></script>
+<script src="crypto-lib.js?v=20261112s06"></script>
+<script src="grid.js?v=20261112s06"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
+const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
+let packKind = "a71";
+let packingSets = {
+  a71: { columns: [], rows: [], fetchedAt: "", history: [] },
+  s06: { columns: [], rows: [], fetchedAt: "", history: [] },
+};
+function emptyPackSet() { return { columns: [], rows: [], fetchedAt: "", history: [] }; }
+function applyPackPayload(payload) {
+  const sets = payload && payload.packingSets;
+  if (sets && (sets.a71 || sets.s06)) {
+    packingSets.a71 = Object.assign(emptyPackSet(), sets.a71 || {});
+    packingSets.s06 = Object.assign(emptyPackSet(), sets.s06 || {});
+  } else {
+    packingSets.a71 = {
+      columns: (payload && payload.packingColumns) || [],
+      rows: (payload && payload.packingRows) || [],
+      fetchedAt: (payload && payload.packingFetchedAt) || "",
+      history: (payload && payload.packingHistory) || [],
+    };
+    packingSets.s06 = emptyPackSet();
+  }
+  if (!currentUser.isAdmin) {
+    const a71n = (packingSets.a71.rows || []).length;
+    const s06n = (packingSets.s06.rows || []).length;
+    if (!a71n && s06n) packKind = "s06";
+    else if (a71n && !s06n) packKind = "a71";
+  }
+  packing = packingSets[packKind] || packingSets.a71;
+}
+function bindPackKind(kind) {
+  packKind = kind === "s06" ? "s06" : "a71";
+  packing = packingSets[packKind] || packingSets.a71;
+  packSelected = new Set();
+  packWidths = [];
+  filters = {};
+  page = 1;
+  setView("pack");
+}
 let users = { users: [] };
 let packWidths = [];
 let histWidths = [];
@@ -200,7 +239,7 @@ function scopedPackRows() {
   if (currentUser.isAdmin) return packing.rows || [];
   return (packing.rows || []).filter(r => rowVisibleTo(r, currentUser.username, packing.columns));
 }
-const DROPDOWN_LABELS = ["国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "动作", "变更字段"];
+const DROPDOWN_LABELS = ["客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "动作", "变更字段"];
 let packSelected = new Set();
 function scopedHistoryRows() {
   const rows = packing.history || [];
@@ -274,7 +313,7 @@ function filterCols() {
     const allow = ["发票号", "PO", "HO", "供应商", "动作", "变更字段"];
     return HISTORY_COLS.filter(c => allow.includes(c.label));
   }
-  const allow = ["发票号", "装箱号", "PO", "HO", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
+  const allow = ["发票号", "装箱号", "客户", "PO", "HO", "Range", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
   return packCols().filter(c => allow.includes(c.label));
 }
 function filteredUsers() {
@@ -1173,7 +1212,7 @@ function exportCurrentRows() {
   const blob = new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (view === "users" ? "账号" : view === "history" ? "历史日志" : "装箱明细") + ".csv";
+  a.download = (view === "users" ? "账号" : view === "history" ? "历史日志" : (PACK_KINDS[packKind] || "装箱明细")) + ".csv";
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1284,15 +1323,21 @@ function setView(name) {
   if (!currentUser.isAdmin && name !== "pack" && name !== "history") name = "pack";
   view = name;
   page = 1;
+  packing = packingSets[packKind] || packingSets.a71;
   document.getElementById("navUsers").classList.toggle("active", name === "users");
-  document.getElementById("navPack").classList.toggle("active", name === "pack");
+  document.getElementById("navPack").classList.toggle("active", name === "pack" && packKind === "a71");
+  const navS06 = document.getElementById("navPackS06");
+  if (navS06) navS06.classList.toggle("active", name === "pack" && packKind === "s06");
   document.getElementById("navHistory").classList.toggle("active", name === "history");
   document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
   document.getElementById("panelPack").style.display = name === "pack" ? "block" : "none";
   document.getElementById("panelHistory").style.display = name === "history" ? "block" : "none";
+  const packLabel = PACK_KINDS[packKind] || "装箱明细";
+  const tab = document.getElementById("packTabLabel");
+  if (tab) tab.textContent = packLabel;
   document.getElementById("crumb").textContent =
     name === "users" ? "维护 / 账号管控" :
-    name === "history" ? "查询 / 历史日志" : "查询 / 装箱明细";
+    name === "history" ? "查询 / 历史日志" : "查询 / " + packLabel;
   renderFilters();
   renderToolbar();
   if (name === "users") renderUsers();
@@ -1360,10 +1405,7 @@ async function updatePackingNow() {
     const packFile = await loadUserPack(currentUser.username);
     const rec = readSession();
     const payload = await unlockPack(packFile, rec && rec.password ? rec.password : document.getElementById("loginPass").value);
-    packing.columns = payload.packingColumns || packing.columns || [];
-    packing.rows = payload.packingRows || packing.rows || [];
-    packing.fetchedAt = info.fetchedAt || payload.packingFetchedAt || packing.fetchedAt || "";
-    packing.history = payload.packingHistory || packing.history || [];
+    applyPackPayload(payload);
     if (payload.users) users = { users: payload.users };
     page = 1;
     renderFilters();
@@ -1630,7 +1672,8 @@ function download(name, obj) {
   URL.revokeObjectURL(a.href);
 }
 document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setView("users"); };
-document.getElementById("navPack").onclick = (e) => { e.preventDefault(); setView("pack"); };
+document.getElementById("navPack").onclick = (e) => { e.preventDefault(); bindPackKind("a71"); };
+document.getElementById("navPackS06").onclick = (e) => { e.preventDefault(); bindPackKind("s06"); };
 document.getElementById("navHistory").onclick = (e) => { e.preventDefault(); setView("history"); };
 function reloadView() {
   page = 1;
@@ -1655,6 +1698,7 @@ function afterLogin() {
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   document.getElementById("navPack").style.display = "";
+  document.getElementById("navPackS06").style.display = "";
   document.getElementById("navHistory").style.display = "";
   setView("pack");
   touchSession();
@@ -1708,10 +1752,7 @@ async function tryLogin(fromSaved) {
       name: payload.name || payload.username,
       isAdmin: !!payload.isAdmin || isAdminUser(payload.username),
     };
-    packing.columns = payload.packingColumns || packing.columns || [];
-    packing.rows = payload.packingRows || packing.rows || [];
-    packing.fetchedAt = payload.packingFetchedAt || packing.fetchedAt || "";
-    packing.history = payload.packingHistory || packing.history || [];
+    applyPackPayload(payload);
     if (payload.users) users = { users: payload.users };
     else {
       users = { users: [{
