@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112s06e" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112s06e" />
+<link rel="stylesheet" href="srm.css?v=20261112menu" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112menu" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112s06e"></script>
-<script src="grid.js?v=20261112s06e"></script>
-<script src="s06-mark.js?v=20261112s06e"></script>
+<script src="crypto-lib.js?v=20261112menu"></script>
+<script src="grid.js?v=20261112menu"></script>
+<script src="s06-mark.js?v=20261112menu"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -148,14 +148,17 @@ function applyPackPayload(payload) {
     packingSets.s06 = emptyPackSet();
   }
   if (!currentUser.isAdmin) {
-    const a71n = (packingSets.a71.rows || []).length;
-    const s06n = (packingSets.s06.rows || []).length;
-    if (!a71n && s06n) packKind = "s06";
-    else if (a71n && !s06n) packKind = "a71";
+    const allow = allowedPackMenus();
+    PACK_MENU_DEFS.forEach(m => {
+      if (!allow.includes(m.key)) packingSets[m.key] = emptyPackSet();
+    });
+    if (!allow.includes(packKind)) packKind = allow[0] || "a71";
   }
   packing = packingSets[packKind] || packingSets.a71;
 }
 function bindPackKind(kind) {
+  const allow = allowedPackMenus();
+  if (allow.length && !allow.includes(kind === "s06" ? "s06" : "a71")) return;
   packKind = kind === "s06" ? "s06" : "a71";
   packing = packingSets[packKind] || packingSets.a71;
   packSelected = new Set();
@@ -180,17 +183,53 @@ const HISTORY_COLS = [
   { key: "oldValue", label: "原值" },
   { key: "newValue", label: "新值" },
 ];
+const PACK_MENU_DEFS = [
+  { key: "a71", label: "A71-装箱明细" },
+  { key: "s06", label: "S06-装箱明细" },
+];
 const USER_COLS = [
   { key: "name", label: "供应商" },
   { key: "username", label: "用户名" },
+  { key: "menusLabel", label: "菜单权限" },
   { key: "createdBy", label: "创建人" },
   { key: "createdAt", label: "创建时间" },
   { key: "updatedBy", label: "修改人" },
   { key: "updatedAt", label: "修改时间" },
 ];
-let userWidths = [88, 280, 100, 88, 150, 88, 150];
+let userWidths = [88, 220, 100, 200, 88, 150, 88, 150];
 let view = "pack";
-let currentUser = { username: "", name: "", isAdmin: false };
+let currentUser = { username: "", name: "", isAdmin: false, menus: null };
+function allowedPackMenus() {
+  if (currentUser.isAdmin) return PACK_MENU_DEFS.map(m => m.key);
+  if (Array.isArray(currentUser.menus)) {
+    return PACK_MENU_DEFS.map(m => m.key).filter(k => currentUser.menus.includes(k));
+  }
+  const keys = [];
+  if ((packingSets.a71.rows || []).length) keys.push("a71");
+  if ((packingSets.s06.rows || []).length) keys.push("s06");
+  return keys;
+}
+function inferUserMenus(uname) {
+  const code = String(uname || "").trim().toUpperCase();
+  if (!code) return [];
+  if (isAdminUser(code)) return PACK_MENU_DEFS.map(m => m.key);
+  const keys = [];
+  const vis = (set) => (set.rows || []).some(r => rowVisibleTo(r, code, set.columns || packing.columns));
+  if (vis(packingSets.a71)) keys.push("a71");
+  if (vis(packingSets.s06)) keys.push("s06");
+  return keys;
+}
+function userMenus(u) {
+  if (!u) return [];
+  if (isAdminUser(u.username)) return PACK_MENU_DEFS.map(m => m.key);
+  if (Array.isArray(u.menus)) return PACK_MENU_DEFS.map(m => m.key).filter(k => u.menus.includes(k));
+  return inferUserMenus(u.username);
+}
+function menusLabelOf(u) {
+  const keys = userMenus(u);
+  if (!keys.length) return "未开通";
+  return keys.map(k => (PACK_MENU_DEFS.find(m => m.key === k) || { label: k }).label.replace("-装箱明细", "")).join("、");
+}
 const SESSION_KEY = "invoice.session";
 const IDLE_MS = 30 * 60 * 1000;
 let idleTimer = null;
@@ -1613,7 +1652,10 @@ function renderUsers() {
   document.getElementById("userBody").innerHTML = slice.map((u) => {
     const i = users.users.indexOf(u);
     return "<tr><td>" + opsHtml("user", i) + "</td>" +
-      USER_COLS.map(c => `<td title="${esc(u[c.key])}">${esc(u[c.key])}</td>`).join("") +
+      USER_COLS.map(c => {
+        const v = c.key === "menusLabel" ? menusLabelOf(u) : (u[c.key] == null ? "" : u[c.key]);
+        return `<td title="${esc(v)}">${esc(v)}</td>`;
+      }).join("") +
       "</tr>";
   }).join("");
   bindOps();
@@ -1668,13 +1710,21 @@ function bindOps() {
 function openUserModal(i) {
   modalKind = "user";
   modalIndex = i;
-  const u = i < 0 ? { username: "", name: "", password: "" } : users.users[i];
+  const u = i < 0 ? { username: "", name: "", password: "", menus: [] } : users.users[i];
   document.getElementById("modalTitle").textContent = i < 0 ? "新增账号" : "修改账号";
   const pwdHint = i < 0 ? `<div class="item"><label>密码</label><input id="f_password" placeholder="留空则自动生成 8 位" /></div>` : "";
+  const adminLock = isAdminUser(u.username);
+  const checked = userMenus(u);
+  const menuBox = PACK_MENU_DEFS.map(m => {
+    const on = adminLock || checked.includes(m.key);
+    const dis = adminLock ? "disabled" : "";
+    return `<label class="menu-check"><input type="checkbox" data-menu="${m.key}" ${on ? "checked" : ""} ${dis} /> ${esc(m.label)}</label>`;
+  }).join("");
   document.getElementById("modalForm").innerHTML = `
     <div class="item"><label>供应商</label><input id="f_name" value="${esc(u.name)}" /></div>
     <div class="item"><label>用户名</label><input id="f_username" value="${esc(u.username)}" /></div>
     ${pwdHint}
+    <div class="item item-menus"><label>菜单权限</label><div id="f_menus">${menuBox}</div></div>
   `;
   document.getElementById("modal").classList.add("on");
 }
@@ -1736,6 +1786,12 @@ document.getElementById("modalOk").onclick = async () => {
     username: document.getElementById("f_username").value.trim().toUpperCase(),
     name: document.getElementById("f_name").value.trim(),
     password: pwdEl ? pwdEl.value.trim() : "",
+    menus: isAdminUser(document.getElementById("f_username").value)
+      ? PACK_MENU_DEFS.map(m => m.key)
+      : PACK_MENU_DEFS.map(m => m.key).filter(k => {
+          const el = document.querySelector('#f_menus input[data-menu="' + k + '"]');
+          return el && el.checked;
+        }),
   };
   const who = operatorName();
   const t = nowText();
@@ -1752,7 +1808,8 @@ document.getElementById("modalOk").onclick = async () => {
     rec.updatedBy = who;
     rec.updatedAt = t;
     rec.password = "";
-    users.users[modalIndex] = rec;
+    rec.menus = rec.menus;
+    users.users[modalIndex] = Object.assign({}, users.users[modalIndex], rec);
   }
   renderUsers();
   document.getElementById("modal").classList.remove("on");
@@ -1793,10 +1850,13 @@ function afterLogin() {
     location.reload();
   };
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
-  document.getElementById("navPack").style.display = "";
-  document.getElementById("navPackS06").style.display = "";
+  const allow = allowedPackMenus();
+  document.getElementById("navPack").style.display = allow.includes("a71") ? "" : "none";
+  document.getElementById("navPackS06").style.display = allow.includes("s06") ? "" : "none";
   document.getElementById("navHistory").style.display = "";
-  setView("pack");
+  if (allow.length && !allow.includes(packKind)) packKind = allow[0];
+  packing = packingSets[packKind] || packingSets.a71;
+  setView(allow.length ? "pack" : (currentUser.isAdmin ? "users" : "history"));
   touchSession();
   if (!idleBound) {
     idleBound = true;
@@ -1847,6 +1907,7 @@ async function tryLogin(fromSaved) {
       username: payload.username,
       name: payload.name || payload.username,
       isAdmin: !!payload.isAdmin || isAdminUser(payload.username),
+      menus: Array.isArray(payload.menus) ? payload.menus : null,
     };
     applyPackPayload(payload);
     if (payload.users) users = { users: payload.users };
