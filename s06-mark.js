@@ -253,10 +253,12 @@
   function rowToJob(row, from, to, total, isTail) {
     var det = detectTemplate(row.country || row.port || "");
     var dims = rowDims(row);
-    var job = {
+    return {
+      id: String(row.gicode || row.id || "").trim(),
       po: String(row.po || "").trim(),
       ho: String(row.ho || "").trim(),
       range: String(row.range || "").trim(),
+      qtyOrder: String(row.qtyOrder || row.salqtc || "").trim(),
       tpl: det ? det.code : "",
       dims: dims,
       gw: String(row.gross || "").trim(),
@@ -266,9 +268,9 @@
       cartonTotal: String(total),
       layout: "auto",
       isTail: !!isTail,
-      isFullSplit: !isTail && from !== to
+      isFullSplit: !isTail && Number(from) !== Number(to),
+      country: String(row.country || "").trim()
     };
-    return job;
   }
   function packingToJobs(rows) {
     var usable = (rows || []).filter(function (r) {
@@ -395,5 +397,248 @@
     });
   }
 
-  global.S06Mark = { exportPdf: exportPdf, packingToJobs: packingToJobs, detectTemplate: detectTemplate };
+  function gwOverLimit(text) {
+    var n = parseNum(text);
+    return !isNaN(n) && n > 13.0001;
+  }
+  function dimsMinOf(tpl) {
+    if (tpl === "QD") return 15;
+    if (tpl === "AU" || tpl === "POL" || tpl === "USA") return 13;
+    return 0;
+  }
+  function dimsTooSmall(job) {
+    if (!job || !job.dims || !dimsFormatOk(job.dims)) return null;
+    var min = dimsMinOf(job.tpl);
+    if (!min) return null;
+    var p = parseDims(job.dims);
+    if (!p) return null;
+    for (var i = 0; i < 3; i++) {
+      if (p[i] < min) {
+        return job.tpl === "QD" ? "QD纸箱尺寸不能小于15*15*15" : "AU/POL/USA纸箱尺寸不能小于13*13*13";
+      }
+    }
+    return null;
+  }
+  function factoryMissing(job) {
+    var miss = [];
+    if (!String(job.dims || "").trim()) miss.push("DIMMENSIONS");
+    if (!String(job.gw || "").trim()) miss.push("GROSS WEIGHT");
+    if (!String(job.qtyCtn || "").trim()) miss.push("QUANTITY IN CARTON");
+    if (!String(job.cartonFrom || "").trim()) miss.push("CARTON NUMBER");
+    if (!String(job.cartonTotal || "").trim()) miss.push("总箱数");
+    if (!job.tpl) miss.push("模板");
+    return miss;
+  }
+  function gwFormatOk(text) {
+    var s = String(text || "").replace(/\s*kgs?\s*$/i, "").trim();
+    if (!s) return true;
+    return /^\d+(?:\.\d+)?$/.test(s);
+  }
+  function qtyFormatOk(text) {
+    var s = String(text || "").replace(/\s*(pcs?|pieces?)\s*$/i, "").trim();
+    if (!s) return true;
+    return /^\d+$/.test(s) && Number(s) > 0;
+  }
+  function intFormatOk(text) {
+    var s = String(text || "").trim();
+    if (!s) return true;
+    return /^\d+$/.test(s) && Number(s) > 0;
+  }
+  function factoryFormatErrors(job) {
+    var errs = [];
+    if (job.dims && !dimsFormatOk(job.dims)) errs.push("DIMMENSIONS必须用 * 连接，例如 52*36*20");
+    if (job.gw && !gwFormatOk(job.gw)) errs.push("GROSS WEIGHT格式不正确");
+    if (job.qtyCtn && !qtyFormatOk(job.qtyCtn)) errs.push("QUANTITY IN CARTON必须为正整数");
+    if (job.cartonFrom && !intFormatOk(job.cartonFrom)) errs.push("CARTON NUMBER必须为正整数");
+    if (job.cartonTotal && !intFormatOk(job.cartonTotal)) errs.push("总箱数必须为正整数");
+    if (job.cartonFrom && job.cartonTotal && intFormatOk(job.cartonFrom) && intFormatOk(job.cartonTotal)
+        && parseInt(job.cartonFrom, 10) > parseInt(job.cartonTotal, 10)) {
+      errs.push("CARTON NUMBER不能大于总箱数");
+    }
+    return errs;
+  }
+  function qtyMismatch(job) {
+    if (!job || job.isFullSplit || job.isTail) return null;
+    var order = parseNum(job.qtyOrder);
+    var per = parseNum(job.qtyCtn);
+    var boxes = parseNum(job.cartonTotal);
+    if (isNaN(order) || isNaN(per) || isNaN(boxes)) return null;
+    var prod = per * boxes;
+    if (Math.abs(prod - order) < 0.0001) return null;
+    return { order: order, per: per, boxes: boxes, prod: prod };
+  }
+  function tailPlan(job) {
+    if (!job || job.isTail || job.isFullSplit) return null;
+    var order = Math.round(parseNum(job.qtyOrder));
+    var per = Math.round(parseNum(job.qtyCtn));
+    if (!isFinite(order) || !isFinite(per) || order <= 0 || per <= 0) return null;
+    if (per >= order) return null;
+    var rem = order % per;
+    if (rem === 0) return null;
+    var full = Math.floor(order / per);
+    if (full < 1) return null;
+    return { order: order, per: per, full: full, rem: rem, total: full + 1 };
+  }
+  function whoOf(job) {
+    return job.ho || job.po || "未知名细";
+  }
+  function validateJobs(jobs) {
+    var errors = [];
+    var mismatch = [];
+    (jobs || []).forEach(function (job) {
+      var who = whoOf(job);
+      var miss = factoryMissing(job);
+      if (miss.length) errors.push(who + " 缺少 " + miss.join("、"));
+      factoryFormatErrors(job).forEach(function (e) { errors.push(who + " " + e); });
+      if (gwOverLimit(job.gw)) errors.push(who + " 毛重不可超过13.00KG");
+      var dimErr = dimsTooSmall(job);
+      if (dimErr) errors.push(who + " " + dimErr);
+      var qn = parseNum(job.qtyCtn);
+      var on = parseNum(job.qtyOrder);
+      if (!isNaN(qn) && !isNaN(on) && qn > on) errors.push(who + " 每箱数量不能大于签约数");
+      var packedBoxes = parseNum(job.cartonTotal);
+      if (!isNaN(qn) && !isNaN(packedBoxes) && !isNaN(on) && qn * packedBoxes > on + 0.0001) {
+        errors.push(who + " 装箱总数量不能大于签约数");
+      }
+      if (job.dims && !layoutOf(job)) errors.push(who + " 无法判定排版（尺寸必须 长*宽*高）");
+      var plan = tailPlan(job);
+      if (plan) {
+        var hasTail = jobs.some(function (j) {
+          return j.isTail && j.po === job.po && j.ho === job.ho && j.country === job.country;
+        });
+        if (!hasTail) {
+          errors.push(who + " 签约数不能整除每箱，装箱明细需有尾箱行（满箱 " + plan.full + " × " + plan.per + "，尾箱 " + plan.rem + "）");
+        }
+      }
+      var mm = qtyMismatch(job);
+      if (mm && !job.qtyMismatchOk) mismatch.push({ job: job, mm: mm });
+    });
+    return { errors: errors, mismatch: mismatch, jobs: jobs };
+  }
+  function ensureReviewDom() {
+    if (document.getElementById("s06-review-mask")) return;
+    var wrap = document.createElement("div");
+    wrap.innerHTML = ''
+      + '<div class="s06-review-mask" id="s06-review-mask">'
+      + '  <div class="s06-review-top">'
+      + '    <div class="ttl">S06 箱唛预览核对</div>'
+      + '    <div class="s06-review-rule" id="s06-review-rule"></div>'
+      + '    <button class="btn" type="button" id="s06-review-zoom">放大镜</button>'
+      + '    <button class="btn btn-plain" type="button" id="s06-review-back">返回修改</button>'
+      + '    <button class="btn btn-blue" type="button" id="s06-review-ok">确认OK</button>'
+      + '  </div>'
+      + '  <div class="s06-review-body" id="s06-review-body"></div>'
+      + '</div>'
+      + '<div class="s06-zoom-mask" id="s06-zoom-mask">'
+      + '  <div class="s06-zoom-view" id="s06-zoom-view"></div>'
+      + '  <div class="s06-zoom-hint">点击空白处关闭放大</div>'
+      + '</div>';
+    while (wrap.firstChild) document.body.appendChild(wrap.firstChild);
+  }
+  function closeZoom() {
+    var z = document.getElementById("s06-zoom-mask");
+    if (z) z.className = "s06-zoom-mask";
+  }
+  function openZoom(slot) {
+    if (!slot) return;
+    var z = document.getElementById("s06-zoom-view");
+    var mask = document.getElementById("s06-zoom-mask");
+    if (!z || !mask) return;
+    var land = (" " + slot.className + " ").indexOf(" land ") >= 0;
+    z.className = "s06-zoom-view " + (land ? "land" : "port");
+    var sheet = slot.querySelector(".sheet");
+    z.innerHTML = sheet ? sheet.outerHTML : slot.innerHTML;
+    mask.className = "s06-zoom-mask show";
+    requestAnimationFrame(function () { fitOverflow(z); });
+  }
+  function closeReview() {
+    var m = document.getElementById("s06-review-mask");
+    if (m) m.className = "s06-review-mask";
+    closeZoom();
+  }
+  function renderReview(jobs) {
+    ensureReviewDom();
+    var copies = expandCopies(jobs);
+    if (!copies.length) throw new Error("无法生成预览图：请检查模板和箱号。");
+    var has2 = false, has4 = false, i;
+    for (i = 0; i < copies.length; i++) {
+      if (copies[i].layout === "4") has4 = true;
+      else has2 = true;
+    }
+    var rule = [];
+    if (has2) rule.push("纸箱尺寸大于30*30*20，A4纸一开二");
+    if (has4) rule.push("纸箱尺寸小于30*30*20，A4纸一开四");
+    var ruleEl = document.getElementById("s06-review-rule");
+    if (ruleEl) ruleEl.textContent = rule.join("；");
+    var html = "";
+    packSheets(copies).forEach(function (sheet) {
+      var L = sheet.layout;
+      var batch = sheet.batch;
+      var hoSeen = {}, hos = [], b;
+      for (b = 0; b < batch.length; b++) {
+        var hov = (batch[b].job && batch[b].job.ho) ? String(batch[b].job.ho) : "";
+        if (hov && !hoSeen[hov]) { hoSeen[hov] = 1; hos.push(hov); }
+      }
+      var sizeTxt = L === "4" ? "13.9x9.6 cm，标题 7.2pt/内容 18pt" : "20x13 cm，标题 9.6pt/内容 24pt";
+      html += '<div class="s06-review-block">'
+        + '<div class="s06-review-meta"><div class="s06-review-ho">' + esc(hos.join(" / ")) + "</div>"
+        + '<div class="s06-review-size">' + sizeTxt + "</div></div>"
+        + '<div class="s06-review-slot ' + (L === "4" ? "land" : "port") + '"><button type="button" class="s06-review-loupe" title="放大">🔍</button>'
+        + emitPage(L, batch) + "</div></div>";
+    });
+    var box = document.getElementById("s06-review-body");
+    box.innerHTML = html;
+    document.getElementById("s06-review-mask").className = "s06-review-mask show";
+    requestAnimationFrame(function () { fitOverflow(box); });
+  }
+  function review(rows, opts) {
+    opts = opts || {};
+    var jobs = packingToJobs(rows);
+    var result = validateJobs(jobs);
+    if (result.errors.length) {
+      return Promise.reject(new Error(result.errors.slice(0, 12).join("\n") + (result.errors.length > 12 ? "\n…" : "")));
+    }
+    function showPreview() {
+      renderReview(jobs);
+      return new Promise(function (resolve, reject) {
+        document.getElementById("s06-review-back").onclick = function () {
+          closeReview();
+          reject(new Error("已返回修改"));
+        };
+        document.getElementById("s06-review-ok").onclick = function () {
+          closeReview();
+          resolve({ jobs: jobs, ids: jobs.map(function (j) { return j.id; }).filter(Boolean) });
+        };
+        document.getElementById("s06-review-zoom").onclick = function () {
+          var first = document.querySelector("#s06-review-body .s06-review-slot");
+          openZoom(first);
+        };
+        document.getElementById("s06-review-body").onclick = function (ev) {
+          var slot = ev.target.closest ? ev.target.closest(".s06-review-slot") : null;
+          if (slot) openZoom(slot);
+        };
+        document.getElementById("s06-zoom-mask").onclick = function (ev) {
+          if (ev.target.id === "s06-zoom-mask" || (ev.target.className || "").indexOf("s06-zoom-hint") >= 0) closeZoom();
+        };
+      });
+    }
+    if (result.mismatch.length && opts.confirmMismatch) {
+      var m = result.mismatch[0];
+      var msg = "货号 " + whoOf(m.job) + "：装箱数 × 每箱数量 = " + m.mm.boxes + " × " + m.mm.per + " = " + m.mm.prod + "，签约数 " + m.mm.order + "，不相等。是否进行下一步？";
+      return Promise.resolve(opts.confirmMismatch(msg)).then(function (ok) {
+        if (!ok) return Promise.reject(new Error("已返回修改"));
+        result.mismatch.forEach(function (x) { x.job.qtyMismatchOk = true; });
+        return showPreview();
+      });
+    }
+    return showPreview();
+  }
+
+  global.S06Mark = {
+    exportPdf: exportPdf,
+    packingToJobs: packingToJobs,
+    detectTemplate: detectTemplate,
+    validateJobs: validateJobs,
+    review: review
+  };
 })(window);

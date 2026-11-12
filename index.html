@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112s06c" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112s06c" />
+<link rel="stylesheet" href="srm.css?v=20261112s06d" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112s06d" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112s06c"></script>
-<script src="grid.js?v=20261112s06c"></script>
-<script src="s06-mark.js?v=20261112s06c"></script>
+<script src="crypto-lib.js?v=20261112s06d"></script>
+<script src="grid.js?v=20261112s06d"></script>
+<script src="s06-mark.js?v=20261112s06d"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -248,6 +248,7 @@ function scopedPackRows() {
 }
 const DROPDOWN_LABELS = ["客户", "国家", "供应商", "业务员", "跟单员", "数量类型", "装箱类型", "品牌", "Range", "动作", "变更字段"];
 let packSelected = new Set();
+let s06Confirmed = new Set();
 function scopedHistoryRows() {
   const rows = packing.history || [];
   if (currentUser.isAdmin) return rows;
@@ -321,7 +322,7 @@ function filterCols() {
     return HISTORY_COLS.filter(c => allow.includes(c.label));
   }
   const allow = packKind === "s06"
-    ? ["装箱号", "客户", "PO", "HO", "Range", "数量类型", "装箱类型", "品牌", "供应商", "国家"]
+    ? ["装箱号", "客户", "PO", "HO", "Range", "订单数量", "数量类型", "装箱类型", "品牌", "供应商", "国家"]
     : ["发票号", "装箱号", "客户", "PO", "HO", "Range", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
   return packCols().filter(c => allow.includes(c.label));
 }
@@ -810,13 +811,53 @@ function fmtDateShort(v) {
   }
   return s;
 }
+function s06AskYesNo(msg) {
+  return new Promise(resolve => {
+    ask(msg, () => resolve(true));
+    const closeFalse = () => {
+      document.getElementById("dlg").classList.remove("on");
+      resolve(false);
+    };
+    document.getElementById("dlgCancel").onclick = closeFalse;
+    document.getElementById("dlgX").onclick = closeFalse;
+  });
+}
+async function reviewS06Marks() {
+  const { picked, bad } = pickedOfficialRows();
+  if (bad.length) { ask(bad.join("；")); return; }
+  if (!picked.length) { ask("请先勾选要复核的装箱明细"); return; }
+  if (!window.S06Mark || typeof S06Mark.review !== "function") {
+    ask("箱唛复核组件未加载，请刷新后再试");
+    return;
+  }
+  try {
+    const info = await S06Mark.review(picked, { confirmMismatch: s06AskYesNo });
+    picked.forEach(r => {
+      const id = String(r.gicode || r.id || "").trim();
+      if (id) s06Confirmed.add(id);
+    });
+    (info.ids || []).forEach(id => { if (id) s06Confirmed.add(id); });
+    show("已确认OK " + picked.length + " 条，可以导出箱唛PDF");
+  } catch (e) {
+    if (String(e && e.message) === "已返回修改") return;
+    ask((e && e.message) ? e.message : "复核失败");
+  }
+}
 async function exportS06Marks() {
   const { picked, bad } = pickedOfficialRows();
   if (bad.length) {
-    ask(bad.join("\n"));
+    ask(bad.join("；"));
     return;
   }
   if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  const notOk = picked.filter(r => {
+    const id = String(r.gicode || r.id || "").trim();
+    return !id || !s06Confirmed.has(id);
+  });
+  if (notOk.length) {
+    ask("请先点「复核预览箱唛」并确认OK。未复核 " + notOk.length + " 行");
+    return;
+  }
   if (!window.S06Mark || typeof S06Mark.exportPdf !== "function") {
     ask("箱唛导出组件未加载，请刷新后再试");
     return;
@@ -1389,7 +1430,8 @@ function renderToolbar() {
       `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` +
       `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>`;
     const s06Export = packKind === "s06"
-      ? `<button class="btn btn-blue" id="btnExportS06Mark">导出箱唛PDF</button>`
+      ? `<button class="btn btn-blue" id="btnReviewS06Mark">复核预览箱唛</button>` +
+        `<button class="btn btn-blue" id="btnExportS06Mark">导出箱唛PDF</button>`
       : "";
     bar.innerHTML = a71Export + s06Export + updateBtn +
       `<span class="sel-count" id="packSelCount"></span>` +
@@ -1400,6 +1442,8 @@ function renderToolbar() {
     if (pdfBtn) pdfBtn.onclick = exportPackPdf;
     const s06Btn = document.getElementById("btnExportS06Mark");
     if (s06Btn) s06Btn.onclick = exportS06Marks;
+    const s06Rev = document.getElementById("btnReviewS06Mark");
+    if (s06Rev) s06Rev.onclick = reviewS06Marks;
     const clr = document.getElementById("btnClearSel");
     if (clr) clr.onclick = () => { packSelected = new Set(); renderPack(); };
     updatePackSelCount();

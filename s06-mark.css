@@ -191,3 +191,132 @@
   background: #000 !important;
   color: #fff !important;
 }
+.s06-review-mask {
+  display: none;
+  position: fixed;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: #e7f0fa;
+  z-index: 60;
+  flex-direction: column;
+}
+.s06-review-mask.show { display: flex; }
+.s06-review-top {
+  height: 48px;
+  background: #2e78b8;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+.s06-review-top .ttl { font-weight: 700; }
+.s06-review-rule { color: #ffb4b4; font-weight: 700; font-size: 13px; margin-right: auto; }
+.s06-review-body {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  background: #c5d4e4;
+}
+.s06-review-block { margin: 0 auto 28px; width: fit-content; }
+.s06-review-meta { text-align: center; margin-bottom: 8px; color: #16324d; }
+.s06-review-ho { font-weight: 700; font-size: 16px; line-height: 1.3; }
+.s06-review-size { font-size: 13px; margin-top: 2px; }
+.s06-review-slot {
+  margin: 0 auto;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 2px 14px rgba(22,50,77,.2);
+  position: relative;
+  cursor: zoom-in;
+}
+.s06-review-slot.port { width: 94.5mm; height: 133.65mm; }
+.s06-review-slot.land { width: 133.65mm; height: 94.5mm; }
+.s06-review-body .sheet { position: relative; overflow: hidden; transform-origin: top left; }
+.s06-review-body .sheet-2 {
+  width: 210mm; height: 297mm;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18.5mm; transform: scale(0.45);
+}
+.s06-review-body .sheet-4 {
+  width: 297mm; height: 210mm;
+  display: grid;
+  grid-template-columns: 139mm 139mm;
+  grid-template-rows: 96mm 96mm;
+  justify-content: center; align-content: center;
+  column-gap: 8mm; row-gap: 8mm;
+  transform: scale(0.45);
+}
+.s06-review-body .sheet-2 .cut-h {
+  position: absolute; left: 8mm; right: 8mm; top: 50%;
+  border-top: 2px dashed #e10600;
+}
+.s06-review-body .sheet-4 .cut-h {
+  position: absolute; left: 10mm; right: 10mm; top: 50%;
+  border-top: 2px dashed #e10600;
+}
+.s06-review-body .sheet-4 .cut-v {
+  position: absolute; top: 10mm; bottom: 10mm; left: 50%;
+  border-left: 2px dashed #e10600;
+}
+.s06-review-body .sheet-4 .cell {
+  width: 139mm; height: 96mm;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.s06-review-body .sheet-4.pair,
+.s06-zoom-view .sheet-4.pair { grid-template-rows: 96mm; }
+.s06-review-body .sheet-4.pair .cut-h,
+.s06-zoom-view .sheet-4.pair .cut-h { display: none; }
+.s06-review-body .dest-val,
+.s06-zoom-view .dest-val { background: #000 !important; color: #fff !important; }
+.s06-review-loupe {
+  position: absolute; right: 6px; top: 6px; z-index: 4;
+  width: 32px; height: 32px; border: 1px solid #2e84dc;
+  background: #fff; color: #1b73d1; font-size: 18px; line-height: 30px;
+  text-align: center; cursor: pointer; border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(22,50,77,.2);
+}
+.s06-zoom-mask {
+  display: none;
+  position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(15,23,38,.72);
+  z-index: 80; overflow: auto; padding: 20px;
+}
+.s06-zoom-mask.show { display: block; }
+.s06-zoom-view {
+  margin: 0 auto; background: #fff;
+  box-shadow: 0 8px 28px rgba(0,0,0,.35); overflow: hidden;
+}
+.s06-zoom-view.port { width: 168mm; height: 237.6mm; }
+.s06-zoom-view.land { width: 237.6mm; height: 168mm; }
+.s06-zoom-view .sheet { position: relative; overflow: hidden; transform-origin: top left; }
+.s06-zoom-view .sheet-2 {
+  width: 210mm; height: 297mm;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18.5mm; transform: scale(0.8);
+}
+.s06-zoom-view .sheet-4 {
+  width: 297mm; height: 210mm;
+  display: grid;
+  grid-template-columns: 139mm 139mm;
+  grid-template-rows: 96mm 96mm;
+  justify-content: center; align-content: center;
+  column-gap: 8mm; row-gap: 8mm;
+  transform: scale(0.8);
+}
+.s06-zoom-view .sheet-2 .cut-h,
+.s06-zoom-view .sheet-4 .cut-h {
+  position: absolute; left: 8mm; right: 8mm; top: 50%;
+  border-top: 2px dashed #e10600;
+}
+.s06-zoom-view .sheet-4 .cut-v {
+  position: absolute; top: 10mm; bottom: 10mm; left: 50%;
+  border-left: 2px dashed #e10600;
+}
+.s06-zoom-view .sheet-4 .cell {
+  width: 139mm; height: 96mm;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.s06-zoom-hint { text-align: center; color: #fff; margin-top: 10px; font-size: 13px; }
