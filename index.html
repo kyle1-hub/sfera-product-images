@@ -6,7 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112s06b" />
+<link rel="stylesheet" href="srm.css?v=20261112s06c" />
+<link rel="stylesheet" href="s06-mark.css?v=20261112s06c" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -117,10 +118,12 @@
 </div>
 <script src="lib/exceljs.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112s06b"></script>
-<script src="grid.js?v=20261112s06b"></script>
+<script src="crypto-lib.js?v=20261112s06c"></script>
+<script src="grid.js?v=20261112s06c"></script>
+<script src="s06-mark.js?v=20261112s06c"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -807,6 +810,28 @@ function fmtDateShort(v) {
   }
   return s;
 }
+async function exportS06Marks() {
+  const { picked, bad } = pickedOfficialRows();
+  if (bad.length) {
+    ask(bad.join("\n"));
+    return;
+  }
+  if (!picked.length) { ask("请先勾选要导出的装箱明细"); return; }
+  if (!window.S06Mark || typeof S06Mark.exportPdf !== "function") {
+    ask("箱唛导出组件未加载，请刷新后再试");
+    return;
+  }
+  const btn = document.getElementById("btnExportS06Mark");
+  if (btn) { btn.disabled = true; btn.textContent = "导出中…"; }
+  try {
+    const info = await S06Mark.exportPdf(picked);
+    show("已导出 " + info.pages + " 页箱唛 PDF：" + info.name);
+  } catch (e) {
+    ask((e && e.message) ? e.message : "导出箱唛失败");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "导出箱唛PDF"; }
+  }
+}
 function pickedOfficialRows() {
   const list = filteredPackList();
   const picked = [];
@@ -1363,13 +1388,18 @@ function renderToolbar() {
     const a71Export = packKind === "s06" ? "" :
       `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` +
       `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>`;
-    bar.innerHTML = a71Export + updateBtn +
+    const s06Export = packKind === "s06"
+      ? `<button class="btn btn-blue" id="btnExportS06Mark">导出箱唛PDF</button>`
+      : "";
+    bar.innerHTML = a71Export + s06Export + updateBtn +
       `<span class="sel-count" id="packSelCount"></span>` +
       `<button type="button" class="btn btn-plain" id="btnClearSel">清空勾选</button>`;
     const btn = document.getElementById("btnExportPack");
     if (btn) btn.onclick = exportPackLabels;
     const pdfBtn = document.getElementById("btnExportPdf");
     if (pdfBtn) pdfBtn.onclick = exportPackPdf;
+    const s06Btn = document.getElementById("btnExportS06Mark");
+    if (s06Btn) s06Btn.onclick = exportS06Marks;
     const clr = document.getElementById("btnClearSel");
     if (clr) clr.onclick = () => { packSelected = new Set(); renderPack(); };
     updatePackSelCount();

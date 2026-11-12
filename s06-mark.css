@@ -1,0 +1,193 @@
+/* S06 carton-mark layout — same as 箱唛工作台 */
+.mark {
+  width: 200mm;
+  height: 130mm;
+  box-sizing: border-box;
+  border: none;
+  box-shadow: inset 0 0 0 2px #000;
+  background: #fff;
+  color: #000;
+  font-family: SimSun, "Songti SC", "Noto Serif SC", serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.mark.sz4 { width: 139mm; height: 96mm; }
+.mark .lab {
+  font-size: 9.6pt;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.1;
+  padding: 0 1.5mm;
+  height: 4.8mm;
+  flex: 0 0 4.8mm;
+  border-bottom: 2px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.mark.sz4 .lab { font-size: 7.2pt; height: 3.6mm; flex-basis: 3.6mm; }
+.qty-head .lab { border-bottom: 0; height: auto; flex: 1; }
+.mark .val {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 24pt;
+  font-weight: 700;
+  padding: 0 3mm;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  word-break: normal;
+}
+.mark.sz4 .val { font-size: 18pt; }
+.mark .val.dest-val {
+  background: #e10600;
+  color: #fff;
+  font-weight: 700;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.mk-top { display: flex; flex: 1.22; min-height: 0; position: relative; }
+.mark.sz4 .mk-top { flex: 1; }
+.mk-top::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  border-bottom: 2px solid #000;
+  z-index: 2;
+  pointer-events: none;
+}
+.mk-left { width: 63%; display: flex; flex-direction: column; border-right: 2px solid #000; }
+.mk-right { flex: 1; align-self: stretch; min-height: 0; }
+.mk-box { display: flex; flex-direction: column; flex: 1; min-height: 0; border-bottom: 2px solid #000; }
+.mk-left > .mk-box:last-child { border-bottom: 0; }
+.mk-split { display: flex; flex: 1; min-height: 0; }
+.mk-split > .mk-box { width: 50%; }
+.mk-split > .mk-box + .mk-box { border-left: 2px solid #000; }
+.mk-bottom { display: flex; flex: 1.18; min-height: 0; }
+.mark.sz4 .mk-bottom { flex: 1.08; }
+.mk-col { display: flex; flex-direction: column; min-height: 0; }
+.mk-col.w25 { width: 36%; border-right: 2px solid #000; }
+.mk-col.w75 { flex: 1; }
+.barcode-box { flex: 1.4 !important; }
+.mark.sz4 .barcode-box { flex: 2.05 !important; }
+.barcode-val { min-height: 20mm; }
+.mark.sz4 .barcode-val { min-height: 20mm; }
+.mk-col.w25 > .mk-box:not(.barcode-box) { min-height: 15mm; }
+.mark.sz4 .mk-col.w25 > .mk-box:not(.barcode-box) { min-height: 11mm; }
+.mk-col.w25 .val { padding: 0 2.5mm; }
+.carton-row {
+  display: flex;
+  flex: 1.55;
+  min-height: 12mm;
+  align-items: stretch;
+}
+.mark.sz4 .carton-row { min-height: 7mm; }
+.carton-row .cn-lab {
+  width: 34%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.6pt;
+  font-weight: 700;
+  border-right: 2px solid #000;
+  text-align: center;
+  padding: 2px 1.5mm;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.carton-row .cn-n, .carton-row .cn-t {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24pt;
+  font-weight: 700;
+}
+.mark.sz4 .carton-row .cn-n,
+.mark.sz4 .carton-row .cn-t { font-size: 18pt; }
+.mark.sz4 .carton-row .cn-lab,
+.mark.sz4 .carton-row .cn-of { font-size: 7.2pt; }
+.carton-row .cn-of {
+  width: 16%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.6pt;
+  font-weight: 700;
+  border-left: 2px solid #000;
+  border-right: 2px solid #000;
+}
+#s06-print-root {
+  position: absolute;
+  left: -2000mm;
+  top: 0;
+  display: block;
+}
+#s06-print-root.pdf-capture {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  background: #fff;
+  pointer-events: none;
+}
+#s06-print-root .sheet { position: relative; overflow: hidden; background: #fff; }
+#s06-print-root .sheet-2 {
+  width: 210mm;
+  height: 297mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18.5mm;
+}
+#s06-print-root .sheet-2 .cut-h {
+  position: absolute;
+  left: 8mm; right: 8mm; top: 50%;
+  border-top: 1px dashed #888;
+}
+#s06-print-root .sheet-4 {
+  width: 297mm;
+  height: 210mm;
+  display: grid;
+  grid-template-columns: 139mm 139mm;
+  grid-template-rows: 96mm 96mm;
+  justify-content: center;
+  align-content: center;
+  column-gap: 8mm;
+  row-gap: 8mm;
+}
+#s06-print-root .sheet-4 .cut-h {
+  position: absolute;
+  left: 10mm; right: 10mm; top: 50%;
+  border-top: 1px dashed #888;
+}
+#s06-print-root .sheet-4 .cut-v {
+  position: absolute;
+  top: 10mm; bottom: 10mm; left: 50%;
+  border-left: 1px dashed #888;
+}
+#s06-print-root .sheet-4 .cell {
+  width: 139mm;
+  height: 96mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#s06-print-root .sheet-4.pair { grid-template-rows: 96mm; }
+#s06-print-root .sheet-4.pair .cut-h { display: none; }
+#s06-print-root .dest-val {
+  background: #000 !important;
+  color: #fff !important;
+}
