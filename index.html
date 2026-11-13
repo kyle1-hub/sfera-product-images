@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261112hist" />
-<link rel="stylesheet" href="s06-mark.css?v=20261112hist" />
+<link rel="stylesheet" href="srm.css?v=20261113auto" />
+<link rel="stylesheet" href="s06-mark.css?v=20261113auto" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -121,9 +121,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261112hist"></script>
-<script src="grid.js?v=20261112hist"></script>
-<script src="s06-mark.js?v=20261112hist"></script>
+<script src="crypto-lib.js?v=20261113auto"></script>
+<script src="grid.js?v=20261113auto"></script>
+<script src="s06-mark.js?v=20261113auto"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1867,7 +1867,7 @@ function afterLogin() {
   const allow = allowedPackMenus();
   document.getElementById("navPack").style.display = allow.includes("a71") ? "" : "none";
   document.getElementById("navPackS06").style.display = allow.includes("s06") ? "" : "none";
-  document.getElementById("navHistory").style.display = "";
+  document.getElementById("navHistory").style.display = currentUser.isAdmin ? "" : "none";
   if (allow.length && !allow.includes(packKind)) packKind = allow[0];
   packing = packingSets[packKind] || packingSets.a71;
   setView(allow.length ? "pack" : (currentUser.isAdmin ? "users" : "history"));
