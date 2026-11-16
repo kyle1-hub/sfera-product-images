@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261116upd" />
-<link rel="stylesheet" href="s06-mark.css?v=20261116upd" />
+<link rel="stylesheet" href="srm.css?v=20261116u2" />
+<link rel="stylesheet" href="s06-mark.css?v=20261116u2" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -122,9 +122,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261116upd"></script>
-<script src="grid.js?v=20261116upd"></script>
-<script src="s06-mark.js?v=20261116upd"></script>
+<script src="crypto-lib.js?v=20261116u2"></script>
+<script src="grid.js?v=20261116u2"></script>
+<script src="s06-mark.js?v=20261116u2"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1524,6 +1524,9 @@ function renderToolbar() {
     const updateBtn = currentUser.isAdmin
       ? `<button class="btn" id="btnUpdatePack">更新数据</button>`
       : "";
+    const officialBtn = (currentUser.isAdmin && IS_TEST)
+      ? `<button class="btn btn-plain" id="btnPublishOfficial">发布正式版</button>`
+      : "";
     const a71Export = packKind === "s06" ? "" :
       `<button class="btn btn-blue" id="btnExportPack">导出箱贴</button>` +
       `<button class="btn btn-blue" id="btnExportPdf">导出PDF标签</button>`;
@@ -1531,7 +1534,7 @@ function renderToolbar() {
       ? `<button class="btn btn-blue" id="btnReviewS06Mark">复核预览箱唛</button>` +
         `<button class="btn btn-blue" id="btnExportS06Mark">导出箱唛PDF</button>`
       : "";
-    bar.innerHTML = a71Export + s06Export + updateBtn +
+    bar.innerHTML = a71Export + s06Export + updateBtn + officialBtn +
       `<span class="sel-count" id="packSelCount"></span>` +
       `<button type="button" class="btn btn-plain" id="btnClearSel">清空勾选</button>`;
     const btn = document.getElementById("btnExportPack");
@@ -1550,6 +1553,8 @@ function renderToolbar() {
   if (addUser) addUser.onclick = () => openUserModal(-1);
   const upd = document.getElementById("btnUpdatePack");
   if (upd) upd.onclick = updatePackingNow;
+  const pubOff = document.getElementById("btnPublishOfficial");
+  if (pubOff) pubOff.onclick = publishOfficialNow;
 }
 function updatePackSelCount() {
   const el = document.getElementById("packSelCount");
@@ -1558,6 +1563,36 @@ function updatePackSelCount() {
   el.textContent = n ? ("已选 " + n + " 行") : "";
 }
 const LOCAL_API = "http://127.0.0.1:8791";
+const IS_TEST = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+async function publishOfficialNow() {
+  if (!currentUser.isAdmin || !IS_TEST) return;
+  ask("确认把当前测试版页面发布到网上正式版？工厂打开的网站会换成这一版。", async () => {
+    const btn = document.getElementById("btnPublishOfficial");
+    if (btn) { btn.disabled = true; btn.textContent = "发布中…"; }
+    show("正在发布正式版，请稍候");
+    try {
+      if (!(await pingLocal())) {
+        ask("连不上本机更新服务，无法发布正式版。");
+        return;
+      }
+      const r = await fetch(LOCAL_API + "/api/publish-official", { method: "POST", cache: "no-store" });
+      const text = await r.text();
+      let info = null;
+      try { info = JSON.parse(text); } catch (e) {}
+      if (!r.ok || !info || !info.ok) {
+        ask((info && info.error) || "发布正式版失败");
+        return;
+      }
+      if (info.published === "no-change") show("正式版已是最新，无需再发");
+      else show("正式版已发布到网站，工厂刷新后生效");
+    } catch (e) {
+      ask((e && e.message) ? e.message : "发布正式版失败");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "发布正式版"; }
+      setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 6000);
+    }
+  });
+}
 async function pingLocal() {
   try {
     const ping = await fetch(LOCAL_API + "/api/ping", { cache: "no-store" });
@@ -1566,8 +1601,37 @@ async function pingLocal() {
     return false;
   }
 }
+async function applyUpdatedVault() {
+  const packFile = await loadUserPack(currentUser.username, true);
+  const rec = readSession();
+  const pwd = rec && rec.password ? rec.password : (document.getElementById("loginPass") && document.getElementById("loginPass").value);
+  const payload = await unlockPack(packFile, pwd);
+  applyPackPayload(payload);
+  if (payload.users) users = { users: payload.users };
+  page = 1;
+  renderFilters();
+  redrawCurrentView();
+  return payload;
+}
+function jobDone(st, startedAt) {
+  if (!st || st.running) return null;
+  const last = st.last;
+  if (!last) return null;
+  if (!last.ok) return last;
+  const fin = last.finishedAt || last.fetchedAt || "";
+  if (startedAt && fin && fin < startedAt) return null;
+  return last;
+}
 async function updatePackingNow() {
   if (!currentUser.isAdmin) return;
+  if (!IS_TEST) {
+    if (await pingLocal()) {
+      location.href = LOCAL_API + "/?runUpdate=1";
+      return;
+    }
+    ask("网上的页面不能直接拉数。请打开本机测试页再点「更新数据」：\nhttp://127.0.0.1:8791/");
+    return;
+  }
   const btn = document.getElementById("btnUpdatePack");
   if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
   const t0 = Date.now();
@@ -1578,7 +1642,7 @@ async function updatePackingNow() {
   tick();
   try {
     if (!(await pingLocal())) {
-      ask("连不上本机更新服务。网上的页面要连这台电脑。请打开 http://127.0.0.1:8791/ 再点「更新数据」，并确认 Alpha Code 已登录。");
+      ask("连不上本机更新服务。请确认开机启动项「发票号查询自动更新」已运行，并打开 Alpha Code 登录后再点。");
       return;
     }
     const startedRes = await fetch(LOCAL_API + "/api/update-packing", { method: "POST", cache: "no-store" });
@@ -1589,6 +1653,7 @@ async function updatePackingNow() {
       ask((startedInfo && startedInfo.error) || "更新失败");
       return;
     }
+    const startedAt = (startedInfo && startedInfo.startedAt) || "";
     let last = null;
     for (let i = 0; i < 150; i++) {
       tick();
@@ -1600,39 +1665,27 @@ async function updatePackingNow() {
       } catch (e) {
         continue;
       }
-      if (st && st.running) continue;
-      if (st && st.last) {
-        last = st.last;
-        break;
-      }
+      last = jobDone(st, startedAt);
+      if (last) break;
     }
     if (!last) {
-      ask("后台还在拉取。请过一两分钟点右上角「刷新」，不必再点更新数据。");
+      ask("后台还在拉取。请过一两分钟再点右上角「刷新」。");
       return;
     }
     if (!last.ok) {
       ask(last.error || "更新失败");
       return;
     }
-    const packFile = await loadUserPack(currentUser.username, true);
-    const rec = readSession();
-    const payload = await unlockPack(packFile, rec && rec.password ? rec.password : document.getElementById("loginPass").value);
-    applyPackPayload(payload);
-    if (payload.users) users = { users: payload.users };
-    page = 1;
-    renderFilters();
-    redrawCurrentView();
-    let tip = "已更新：装箱 " + (last.merged || 0) + " 行，历史新增 " + (last.newLogs || 0) + " 条";
-    if (last.newAccounts && last.newAccounts.length) tip += "，新建工厂账号 " + last.newAccounts.length + " 个";
-    if (last.published === "pushed") tip += "，已发布到网站";
-    else if (last.published === "no-change") tip += "，网站数据无变化";
+    await applyUpdatedVault();
+    let tip = "已更新：装箱 " + (last.merged || 0) + " 行，时间 " + (last.fetchedAt || last.finishedAt || "");
+    if (last.newLogs) tip += "，历史新增 " + last.newLogs + " 条";
     show(tip);
     if (last.publishError) ask("本机已更新，但发布网站失败：" + last.publishError);
   } catch (e) {
     ask((e && e.message) ? e.message : "更新失败");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "更新数据"; }
-    setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 8000);
+    setTimeout(() => { const m = document.getElementById("msg"); if (m) m.style.display = "none"; }, 10000);
   }
 }
 async function persistAll() {
@@ -1904,16 +1957,32 @@ document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setVi
 document.getElementById("navPack").onclick = (e) => { e.preventDefault(); bindPackKind("a71"); };
 document.getElementById("navPackS06").onclick = (e) => { e.preventDefault(); bindPackKind("s06"); };
 document.getElementById("navHistory").onclick = (e) => { e.preventDefault(); setView("history"); };
-function reloadView() {
-  page = 1;
-  renderFilters();
-  redrawCurrentView();
-  show("已刷新");
-  setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 1200);
+async function reloadView() {
+  show("正在刷新数据包…");
+  try {
+    await applyUpdatedVault();
+    show("已刷新");
+  } catch (e) {
+    page = 1;
+    renderFilters();
+    redrawCurrentView();
+    show("已刷新");
+  }
+  setTimeout(() => { const m = document.getElementById("msg"); if (m) m.style.display = "none"; }, 1200);
 }
 function afterLogin() {
   document.getElementById("loginBox").style.display = "none";
   document.getElementById("app").style.display = "grid";
+  if (IS_TEST) {
+    document.title = "发票号查询 · 测试";
+    const logo = document.querySelector(".logo");
+    if (logo && !logo.querySelector(".test-tag")) {
+      const tag = document.createElement("span");
+      tag.className = "test-tag";
+      tag.textContent = "测试版";
+      logo.appendChild(tag);
+    }
+  }
   document.getElementById("who").innerHTML =
     (currentUser.name || currentUser.username) +
     '　<button type="button" class="btn btn-text" id="btnPwd">改密码</button>' +
@@ -1940,12 +2009,19 @@ function afterLogin() {
       document.addEventListener(ev, touchSession, { passive: true });
     });
   }
+  if (IS_TEST && currentUser.isAdmin && /(?:\?|&)runUpdate=1(?:&|$)/.test(location.search || "")) {
+    history.replaceState({}, "", location.pathname || "/");
+    setTimeout(() => { updatePackingNow(); }, 300);
+  }
 }
 async function loadUserPack(username, preferLocal) {
   const uname = String(username || "").trim().toUpperCase();
   const urls = [];
-  if (preferLocal) urls.push(LOCAL_API + "/vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
-  urls.push("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  if (IS_TEST) urls.push("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  else {
+    if (preferLocal) urls.push(LOCAL_API + "/vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+    urls.push("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  }
   let lastErr = null;
   for (let i = 0; i < urls.length; i++) {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
