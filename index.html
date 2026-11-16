@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261116off" />
-<link rel="stylesheet" href="s06-mark.css?v=20261116off" />
+<link rel="stylesheet" href="srm.css?v=20261116stay" />
+<link rel="stylesheet" href="s06-mark.css?v=20261116stay" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -122,9 +122,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261116off"></script>
-<script src="grid.js?v=20261116off"></script>
-<script src="s06-mark.js?v=20261116off"></script>
+<script src="crypto-lib.js?v=20261116stay"></script>
+<script src="grid.js?v=20261116stay"></script>
+<script src="s06-mark.js?v=20261116stay"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1624,14 +1624,6 @@ function jobDone(st, startedAt) {
 }
 async function updatePackingNow() {
   if (!currentUser.isAdmin) return;
-  if (!IS_TEST) {
-    if (await pingLocal()) {
-      location.href = LOCAL_API + "/?runUpdate=1";
-      return;
-    }
-    ask("网上的页面不能直接拉数。请打开本机测试页再点「更新数据」：\nhttp://127.0.0.1:8791/");
-    return;
-  }
   const btn = document.getElementById("btnUpdatePack");
   if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
   const t0 = Date.now();
@@ -2008,10 +2000,6 @@ function afterLogin() {
     ["click", "keydown", "mousemove", "scroll"].forEach(ev => {
       document.addEventListener(ev, touchSession, { passive: true });
     });
-  }
-  if (IS_TEST && currentUser.isAdmin && /(?:\?|&)runUpdate=1(?:&|$)/.test(location.search || "")) {
-    history.replaceState({}, "", location.pathname || "/");
-    setTimeout(() => { updatePackingNow(); }, 300);
   }
 }
 async function loadUserPack(username, preferLocal) {
