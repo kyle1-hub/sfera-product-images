@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261113auto" />
-<link rel="stylesheet" href="s06-mark.css?v=20261113auto" />
+<link rel="stylesheet" href="srm.css?v=20261116zip" />
+<link rel="stylesheet" href="s06-mark.css?v=20261116zip" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -117,13 +117,14 @@
   </div>
 </div>
 <script src="lib/exceljs.min.js"></script>
+<script src="lib/jszip.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261113auto"></script>
-<script src="grid.js?v=20261113auto"></script>
-<script src="s06-mark.js?v=20261113auto"></script>
+<script src="crypto-lib.js?v=20261116zip"></script>
+<script src="grid.js?v=20261116zip"></script>
+<script src="s06-mark.js?v=20261116zip"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -690,6 +691,33 @@ function groupPickedByInvoice(picked) {
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2500);
+}
+async function downloadMany(files, zipName) {
+  const list = (files || []).filter(f => f && f.blob && f.name);
+  if (!list.length) throw new Error("没有可下载的文件");
+  if (list.length === 1) {
+    downloadBlob(list[0].blob, list[0].name);
+    return "file";
+  }
+  if (typeof JSZip === "undefined") {
+    for (let i = 0; i < list.length; i++) {
+      if (i) await sleep(400);
+      downloadBlob(list[i].blob, list[i].name);
+    }
+    return "many";
+  }
+  const zip = new JSZip();
+  list.forEach(f => zip.file(f.name, f.blob));
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+  downloadBlob(blob, zipName || "导出.zip");
+  return "zip";
+}
 async function exportPackLabels() {
   const { picked, bad } = pickedOfficialRows();
   if (bad.length) {
@@ -708,11 +736,14 @@ async function exportPackLabels() {
     const res = await fetch("A71-label-template.xlsx?t=" + Date.now());
     if (!res.ok) throw new Error("找不到箱贴模板");
     const templateBuf = await res.arrayBuffer();
+    const files = [];
     for (let gi = 0; gi < groups.length; gi++) {
-      if (gi) await sleep(400);
-      await writePackExcel(templateBuf, groups[gi].rows, groups[gi].invoice, countries[0]);
+      files.push(await writePackExcel(templateBuf, groups[gi].rows, groups[gi].invoice, countries[0]));
     }
-    if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 Excel");
+    const how = await downloadMany(files, "A71箱贴-" + files.length + "份发票.zip");
+    if (how === "zip") show("已按 " + files.length + " 个发票号打成一个 ZIP 下载");
+    else if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 Excel");
+    else show("已导出 Excel");
   } catch (e) {
     ask(e.message || "导出失败");
   }
@@ -827,12 +858,8 @@ async function writePackExcel(templateBuf, picked, invoice, country) {
     ws.getCell("O" + (39 + extra)).value = sumK;
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
     const shipNo = inv || picked.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "NO-INVOICE";
-    a.download = shipNo + "-A71导箱贴文件.xlsx";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    return { name: shipNo + "-A71导箱贴文件.xlsx", blob };
 }
 const COUNTRY_META = {
   ARGENTINA: { n: 1, code: "AR", name: "ARGENTINA", lines: ["VISION 101 S.A.", "ARGENTINA"] },
@@ -1212,13 +1239,12 @@ async function exportPackPdf() {
   }
   const groups = groupPickedByInvoice(picked);
   try {
-    let made = 0;
+    const files = [];
     for (let gi = 0; gi < groups.length; gi++) {
       const rows = groups[gi].rows;
       const inv = groups[gi].invoice;
       const labels = expandCartonLabels(rows);
       if (!labels.length) continue;
-      if (gi) await sleep(400);
       labels.forEach(b => { b.boxTotal = labels.length; });
       const meta = countryMetaOf(countries[0] || rows[0].country);
       const brandCode = brandCodeOf(rows.map(r => r.brand).find(Boolean) || "");
@@ -1238,12 +1264,16 @@ async function exportPackPdf() {
         }
         const suffix = nChunks > 1 ? ("_parte" + (chunk + 1) + "de" + nChunks) : "";
         const shipNo = inv || rows.map(r => String(r.shipHis || "").trim().split(/\s+/)[0]).find(Boolean) || "NO-INVOICE";
-        doc.save("Etiquetas_General_" + shipNo + "_" + labels.length + "cajas" + suffix + ".pdf");
+        files.push({
+          name: "Etiquetas_General_" + shipNo + "_" + labels.length + "cajas" + suffix + ".pdf",
+          blob: doc.output("blob"),
+        });
       }
-      made++;
     }
-    if (!made) { ask("没有可展开的箱数（Quantity Cartons 需大于 0）"); return; }
-    if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 PDF");
+    if (!files.length) { ask("没有可展开的箱数（Quantity Cartons 需大于 0）"); return; }
+    const how = await downloadMany(files, "A71标签-" + files.length + "份.pdf.zip");
+    if (how === "zip") show("已按发票号打成一个 ZIP（" + files.length + " 个 PDF）");
+    else if (groups.length > 1) show("已按 " + groups.length + " 个发票号分别导出 PDF");
   } catch (e) {
     ask(e.message || "导出 PDF 失败");
   }
