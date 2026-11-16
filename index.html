@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261116zip" />
-<link rel="stylesheet" href="s06-mark.css?v=20261116zip" />
+<link rel="stylesheet" href="srm.css?v=20261116upd" />
+<link rel="stylesheet" href="s06-mark.css?v=20261116upd" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -122,9 +122,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261116zip"></script>
-<script src="grid.js?v=20261116zip"></script>
-<script src="s06-mark.js?v=20261116zip"></script>
+<script src="crypto-lib.js?v=20261116upd"></script>
+<script src="grid.js?v=20261116upd"></script>
+<script src="s06-mark.js?v=20261116upd"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1558,31 +1558,63 @@ function updatePackSelCount() {
   el.textContent = n ? ("已选 " + n + " 行") : "";
 }
 const LOCAL_API = "http://127.0.0.1:8791";
+async function pingLocal() {
+  try {
+    const ping = await fetch(LOCAL_API + "/api/ping", { cache: "no-store" });
+    return ping.ok;
+  } catch (e) {
+    return false;
+  }
+}
 async function updatePackingNow() {
   if (!currentUser.isAdmin) return;
   const btn = document.getElementById("btnUpdatePack");
   if (btn) { btn.disabled = true; btn.textContent = "更新中…"; }
-  show("正在拉取装箱明细，请稍候");
+  const t0 = Date.now();
+  const tick = () => {
+    const s = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    show("正在拉取装箱明细，大约 2 分钟。已过 " + s + " 秒，请稍候，不要重复点");
+  };
+  tick();
   try {
-    let pingOk = false;
-    try {
-      const ping = await fetch(LOCAL_API + "/api/ping", { cache: "no-store" });
-      pingOk = ping.ok;
-    } catch (e) { pingOk = false; }
-    if (!pingOk) {
-      ask("连不上本机更新服务。请确认开机启动项「发票号查询自动更新」已运行，并打开 Alpha Code 登录后再点。");
+    if (!(await pingLocal())) {
+      ask("连不上本机更新服务。网上的页面要连这台电脑。请打开 http://127.0.0.1:8791/ 再点「更新数据」，并确认 Alpha Code 已登录。");
       return;
     }
-    const r = await fetch(LOCAL_API + "/api/update-packing", { method: "POST" });
-    const text = await r.text();
-    let info = null;
-    try { info = JSON.parse(text); } catch (e) {}
-    if (!r.ok || !info || !info.ok) {
-      const msg = (info && info.error) || "更新失败";
-      ask(msg);
+    const startedRes = await fetch(LOCAL_API + "/api/update-packing", { method: "POST", cache: "no-store" });
+    const startedText = await startedRes.text();
+    let startedInfo = null;
+    try { startedInfo = JSON.parse(startedText); } catch (e) {}
+    if (!startedRes.ok && startedRes.status !== 409) {
+      ask((startedInfo && startedInfo.error) || "更新失败");
       return;
     }
-    const packFile = await loadUserPack(currentUser.username);
+    let last = null;
+    for (let i = 0; i < 150; i++) {
+      tick();
+      await sleep(2000);
+      let st = null;
+      try {
+        const r = await fetch(LOCAL_API + "/api/update-status", { cache: "no-store" });
+        st = await r.json();
+      } catch (e) {
+        continue;
+      }
+      if (st && st.running) continue;
+      if (st && st.last) {
+        last = st.last;
+        break;
+      }
+    }
+    if (!last) {
+      ask("后台还在拉取。请过一两分钟点右上角「刷新」，不必再点更新数据。");
+      return;
+    }
+    if (!last.ok) {
+      ask(last.error || "更新失败");
+      return;
+    }
+    const packFile = await loadUserPack(currentUser.username, true);
     const rec = readSession();
     const payload = await unlockPack(packFile, rec && rec.password ? rec.password : document.getElementById("loginPass").value);
     applyPackPayload(payload);
@@ -1590,17 +1622,17 @@ async function updatePackingNow() {
     page = 1;
     renderFilters();
     redrawCurrentView();
-    let tip = "已更新：装箱 " + (info.merged || 0) + " 行，历史新增 " + (info.newLogs || 0) + " 条";
-    if (info.newAccounts && info.newAccounts.length) tip += "，新建工厂账号 " + info.newAccounts.length + " 个";
-    if (info.published === "pushed") tip += "，已发布到网站";
-    else if (info.published === "no-change") tip += "，网站数据无变化";
+    let tip = "已更新：装箱 " + (last.merged || 0) + " 行，历史新增 " + (last.newLogs || 0) + " 条";
+    if (last.newAccounts && last.newAccounts.length) tip += "，新建工厂账号 " + last.newAccounts.length + " 个";
+    if (last.published === "pushed") tip += "，已发布到网站";
+    else if (last.published === "no-change") tip += "，网站数据无变化";
     show(tip);
-    if (info.publishError) ask("本机已更新，但发布网站失败：" + info.publishError);
+    if (last.publishError) ask("本机已更新，但发布网站失败：" + last.publishError);
   } catch (e) {
     ask((e && e.message) ? e.message : "更新失败");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "更新数据"; }
-    setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 4000);
+    setTimeout(() => { document.getElementById("msg").style.display = "none"; }, 8000);
   }
 }
 async function persistAll() {
@@ -1909,24 +1941,34 @@ function afterLogin() {
     });
   }
 }
-async function loadUserPack(username) {
+async function loadUserPack(username, preferLocal) {
   const uname = String(username || "").trim().toUpperCase();
-  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), 60000) : null;
-  try {
-    const r = await fetch("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now(), {
-      cache: "no-store",
-      signal: ctrl ? ctrl.signal : undefined,
-    });
-    if (!r.ok) throw new Error("账号不存在");
-    return await r.json();
-  } catch (e) {
-    if (e && e.name === "AbortError") throw new Error("数据包下载超时，请检查网络后重试");
-    if (String(e.message || "").indexOf("账号不存在") >= 0) throw e;
-    throw new Error("数据包下载失败，请刷新后重试");
-  } finally {
-    if (timer) clearTimeout(timer);
+  const urls = [];
+  if (preferLocal) urls.push(LOCAL_API + "/vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  urls.push("vault/" + encodeURIComponent(uname) + ".json?t=" + Date.now());
+  let lastErr = null;
+  for (let i = 0; i < urls.length; i++) {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 60000) : null;
+    try {
+      const r = await fetch(urls[i], {
+        cache: "no-store",
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (!r.ok) {
+        lastErr = new Error("账号不存在");
+        continue;
+      }
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
+  if (lastErr && lastErr.name === "AbortError") throw new Error("数据包下载超时，请检查网络后重试");
+  if (lastErr && String(lastErr.message || "").indexOf("账号不存在") >= 0) throw lastErr;
+  throw new Error("数据包下载失败，请刷新后重试");
 }
 async function tryLogin(fromSaved) {
   const err = document.getElementById("loginErr");
