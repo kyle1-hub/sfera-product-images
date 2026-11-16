@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>发票号查询 · 维护</title>
-<link rel="stylesheet" href="srm.css?v=20261116stay" />
-<link rel="stylesheet" href="s06-mark.css?v=20261116stay" />
+<link rel="stylesheet" href="srm.css?v=20261116off2" />
+<link rel="stylesheet" href="s06-mark.css?v=20261116off2" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -122,9 +122,9 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261116stay"></script>
-<script src="grid.js?v=20261116stay"></script>
-<script src="s06-mark.js?v=20261116stay"></script>
+<script src="crypto-lib.js?v=20261116off2"></script>
+<script src="grid.js?v=20261116off2"></script>
+<script src="s06-mark.js?v=20261116off2"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1563,7 +1563,7 @@ function updatePackSelCount() {
   el.textContent = n ? ("已选 " + n + " 行") : "";
 }
 const LOCAL_API = "http://127.0.0.1:8791";
-const IS_TEST = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+const IS_TEST = false;
 async function publishOfficialNow() {
   if (!currentUser.isAdmin || !IS_TEST) return;
   ask("确认把当前测试版页面发布到网上正式版？工厂打开的网站会换成这一版。", async () => {
