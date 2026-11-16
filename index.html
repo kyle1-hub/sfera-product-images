@@ -1570,7 +1570,7 @@ async function updatePackingNow() {
       pingOk = ping.ok;
     } catch (e) { pingOk = false; }
     if (!pingOk) {
-      ask("本机更新服务还没起来。请先打开 Alpha Code，等开机自动启动完成后再点。");
+      ask("连不上本机更新服务。请确认开机启动项「发票号查询自动更新」已运行，并打开 Alpha Code 登录后再点。");
       return;
     }
     const r = await fetch(LOCAL_API + "/api/update-packing", { method: "POST" });
