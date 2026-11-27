@@ -10,9 +10,9 @@
 <script>
 /*OFFICIAL_BOUNCE*/if (location.hostname === "127.0.0.1" || location.hostname === "localhost") { location.replace("https://kyle1-hub.github.io/sfera-product-images/"); }
 </script>
-<link rel="stylesheet" href="srm.css?v=20261117imp" />
-<link rel="stylesheet" href="s06-mark.css?v=20261117imp" />
-<link rel="stylesheet" href="s06-import.css?v=20261117imp" />
+<link rel="stylesheet" href="srm.css?v=20261127d" />
+<link rel="stylesheet" href="s06-mark.css?v=20261127d" />
+<link rel="stylesheet" href="s06-import.css?v=20261127d" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -78,7 +78,7 @@
       <div class="card table-card" id="panelS06Import">
         <div class="tabs"><span class="on">出货通知单导入模式</span></div>
         <div class="s06i-toolbar">
-          <button class="btn" type="button" id="s06i-btn-import">导入出货通知单</button>
+          <button class="btn" type="button" id="s06i-btn-import">带出跟单数据</button>
           <input type="file" id="s06i-file" accept=".xlsx,.xlsm,.xls" hidden>
           <button class="btn btn-blue" type="button" id="s06i-btn-preview">预览所选箱唛</button>
           <button class="btn btn-blue" type="button" id="s06i-btn-pdf">导出已确认订单箱唛*PDF格式</button>
@@ -99,14 +99,15 @@
           <div class="s06i-list table-wrap">
             <table id="s06i-table">
               <thead><tr>
-                <th></th><th>模板</th><th>目的港</th><th>PO</th><th>HO</th><th>RANGE</th><th>签约数</th>
+                <th><input type="checkbox" class="chk" id="s06i-check-all"></th>
+                <th>模板</th><th>目的港</th><th>PO</th><th>HO</th><th>RANGE</th><th>签约数</th>
                 <th>尺寸</th><th>毛重</th><th>每箱数量</th><th>箱号</th><th>排版</th><th>确认</th>
               </tr></thead>
               <tbody></tbody>
             </table>
           </div>
           <div class="s06i-editor">
-            <div class="s06i-hint" id="s06i-empty">先导入出货通知单，再点一行填写工厂字段。</div>
+            <div class="s06i-hint" id="s06i-empty">点左边一行，填写尺寸 / 毛重 / 每箱数量 / 箱号。</div>
             <div id="s06i-editor-form" style="display:none">
               <div class="s06i-block"><h4>1. 出货通知单自动带出</h4><div class="bd">
                 <div class="s06i-row2">
@@ -160,6 +161,7 @@
             </div>
           </div>
         </div>
+        <div class="pager" id="s06i-pager"></div>
       </div>
       <div class="card table-card" id="panelHistory" style="display:none">
         <div class="tabs"><span class="on">历史日志</span></div>
@@ -219,10 +221,10 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261117imp"></script>
-<script src="grid.js?v=20261117imp"></script>
-<script src="s06-mark.js?v=20261117imp"></script>
-<script src="s06-import.js?v=20261117imp"></script>
+<script src="crypto-lib.js?v=20261127d"></script>
+<script src="grid.js?v=20261127d"></script>
+<script src="s06-mark.js?v=20261127d"></script>
+<script src="s06-import.js?v=20261127d"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -231,7 +233,8 @@ let packingSets = {
   a71: { columns: [], rows: [], fetchedAt: "", history: [] },
   s06: { columns: [], rows: [], fetchedAt: "", history: [] },
 };
-function emptyPackSet() { return { columns: [], rows: [], fetchedAt: "", history: [] }; }
+window.packingSets = packingSets;
+function emptyPackSet() { return { columns: [], rows: [], fetchedAt: "", history: [], noticeRows: [] }; }
 function applyPackPayload(payload) {
   const sets = payload && payload.packingSets;
   if (sets && (sets.a71 || sets.s06)) {
@@ -257,6 +260,10 @@ function applyPackPayload(payload) {
     if (!allow.includes(packKind)) packKind = allow[0] || "a71";
   }
   packing = packingSets[packKind] || packingSets.a71;
+  if (packingSets.s06 && payload.packingSets && payload.packingSets.s06) {
+    packingSets.s06.noticeRows = payload.packingSets.s06.noticeRows || [];
+  }
+  window.packingSets = packingSets;
 }
 function bindPackKind(kind) {
   const allow = allowedPackMenus();
@@ -388,6 +395,12 @@ function valOf(row, key) {
 }
 function packCols() {
   let cols = (packing.columns || []).filter(c => c.key !== "viewers" && c.label !== "可见用户" && c.key !== "shipHis" && c.label !== "发货单号记录" && c.key !== "supplierName" && c.label !== "供应商名称" && c.key !== "gicode" && c.label !== "装箱单明细内码");
+  if (!cols.some(c => c.key === "deliveryDate")) {
+    const ci = cols.findIndex(c => c.key === "customer" || c.label === "客户");
+    const col = { key: "deliveryDate", label: "客户交货日期" };
+    if (ci >= 0) cols.splice(ci + 1, 0, col);
+    else cols.push(col);
+  }
   if (packKind === "s06") {
     cols = cols.filter(c => c.key !== "invoice" && c.label !== "发票号");
     if (!cols.some(c => c.key === "layoutResult")) {
@@ -474,7 +487,15 @@ function matchFilters(row, cols) {
   });
 }
 function filteredPackList() {
-  return scopedPackRows().filter(row => matchFilters(row, packCols()));
+  return scopedPackRows().filter(row => {
+    if (!matchFilters(row, packCols().filter(c => c.key !== "deliveryDate"))) return false;
+    const d = String(row.deliveryDate || "").slice(0, 10);
+    const from = (filters.deliveryDateFrom || "").trim();
+    const to = (filters.deliveryDateTo || "").trim();
+    if (from && (!d || d < from)) return false;
+    if (to && (!d || d > to)) return false;
+    return true;
+  });
 }
 function filteredHistory() {
   return scopedHistoryRows().filter(row => matchFilters(row, HISTORY_COLS));
@@ -482,6 +503,14 @@ function filteredHistory() {
 function filteredRows() {
   if (view === "history") return filteredHistory();
   return filteredPackList();
+}
+function deliveryDateRangeControl() {
+  if (view !== "pack") return "";
+  return `<div class="item item-dates"><label>客户交货日期</label>
+    <input type="date" data-key="deliveryDateFrom" value="${esc(filters.deliveryDateFrom || "")}" />
+    <span class="date-sep">至</span>
+    <input type="date" data-key="deliveryDateTo" value="${esc(filters.deliveryDateTo || "")}" />
+  </div>`;
 }
 function filterCols() {
   if (view === "history") {
@@ -491,7 +520,7 @@ function filterCols() {
   const allow = packKind === "s06"
     ? ["装箱号", "客户", "PO", "HO", "Range", "订单数量", "数量类型", "装箱类型", "品牌", "供应商", "国家", "排版判定"]
     : ["发票号", "装箱号", "客户", "PO", "HO", "Range", "数量类型", "装箱类型", "品牌", "供应商", "国家"];
-  return packCols().filter(c => allow.includes(c.label));
+  return packCols().filter(c => allow.includes(c.label) && c.key !== "deliveryDate");
 }
 function filteredUsers() {
   const qName = (filters.u_name || "").trim().toLowerCase();
@@ -565,7 +594,7 @@ function renderFilters() {
     el.innerHTML = filterControl({ key: "u_name", label: "供应商" }) +
       `<div class="item"><label>用户名</label><input data-key="u_username" placeholder="请输入" value="${esc(filters.u_username || "")}" /></div>`;
   } else {
-    el.innerHTML = filterCols().map(col => filterControl(col)).join("");
+    el.innerHTML = filterCols().map(col => filterControl(col)).join("") + deliveryDateRangeControl();
   }
   act.innerHTML = `
     <button type="button" class="btn" id="btnQuery">查询</button>
@@ -1608,9 +1637,11 @@ function setView(name) {
   document.getElementById("panelPack").style.display = name === "pack" ? "block" : "none";
   document.getElementById("panelHistory").style.display = name === "history" ? "block" : "none";
   const imp = document.getElementById("panelS06Import");
-  if (imp) imp.style.display = name === "s06import" ? "block" : "none";
+  if (imp) imp.style.display = name === "s06import" ? "flex" : "none";
   const filterCard = document.getElementById("filters") && document.getElementById("filters").closest(".card");
   if (filterCard) filterCard.style.display = name === "s06import" ? "none" : "";
+  const content = document.querySelector(".content");
+  if (content) content.classList.remove("pack-work");
   const packLabel = PACK_KINDS[packKind] || "装箱明细";
   const tab = document.getElementById("packTabLabel");
   if (tab) tab.textContent = packLabel;

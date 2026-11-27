@@ -128,6 +128,9 @@ body {
 .topbar .crumb { font-size: 14px; font-weight: 600; }
 .topbar .user { font-size: 12px; opacity: .95; }
 .content { padding: 12px; overflow: auto; flex: 1; min-width: 0; }
+.date-sep { margin: 0 4px; color: #718096; }
+.item-dates { width: auto !important; }
+.item-dates input[type="date"] { width: 138px; min-width: 138px; }
 .card {
   background: #fff;
   border-radius: 2px;
