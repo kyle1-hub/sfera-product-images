@@ -10,8 +10,9 @@
 <script>
 /*OFFICIAL_BOUNCE*/if (location.hostname === "127.0.0.1" || location.hostname === "localhost") { location.replace("https://kyle1-hub.github.io/sfera-product-images/"); }
 </script>
-<link rel="stylesheet" href="srm.css?v=20261116fix" />
-<link rel="stylesheet" href="s06-mark.css?v=20261116fix" />
+<link rel="stylesheet" href="srm.css?v=20261117imp" />
+<link rel="stylesheet" href="s06-mark.css?v=20261117imp" />
+<link rel="stylesheet" href="s06-import.css?v=20261117imp" />
 </head>
 <body>
 <div class="login-wrap" id="loginBox">
@@ -31,7 +32,13 @@
     <nav class="menu">
       <a href="javascript:void(0)" id="navUsers">账号管控</a>
       <a href="javascript:void(0)" class="active" id="navPack">A71-装箱明细</a>
-      <a href="javascript:void(0)" id="navPackS06">S06-装箱明细</a>
+      <div class="nav-group" id="navS06Group">
+        <a href="javascript:void(0)" id="navPackS06" class="nav-parent">S06-装箱明细</a>
+        <div class="nav-sub">
+          <a href="javascript:void(0)" id="navPackS06List">装箱明细</a>
+          <a href="javascript:void(0)" id="navPackS06Import">出货通知单导入模式</a>
+        </div>
+      </div>
       <a href="javascript:void(0)" id="navHistory">历史日志</a>
     </nav>
   </aside>
@@ -67,6 +74,92 @@
           <div class="empty" id="pempty" hidden>暂无数据</div>
         </div>
         <div class="pager" id="ppager"></div>
+      </div>
+      <div class="card table-card" id="panelS06Import">
+        <div class="tabs"><span class="on">出货通知单导入模式</span></div>
+        <div class="s06i-toolbar">
+          <button class="btn" type="button" id="s06i-btn-import">导入出货通知单</button>
+          <input type="file" id="s06i-file" accept=".xlsx,.xlsm,.xls" hidden>
+          <button class="btn btn-blue" type="button" id="s06i-btn-preview">预览所选箱唛</button>
+          <button class="btn btn-blue" type="button" id="s06i-btn-pdf">导出已确认订单箱唛*PDF格式</button>
+          <button class="btn btn-plain" type="button" id="s06i-btn-clear">清空清单</button>
+          <span class="s06i-hint" id="s06i-status"></span>
+        </div>
+        <div class="s06i-filters">
+          <span>筛选</span>
+          <label>出货日期 <select id="s06i-flt-date"><option value="">全部</option></select></label>
+          <label>目的港 <select id="s06i-flt-port"><option value="">全部</option></select></label>
+          <label>PO <input id="s06i-flt-po" placeholder="PO"></label>
+          <label>HO <input id="s06i-flt-ho" placeholder="HO"></label>
+          <button class="btn" type="button" id="s06i-btn-batch">批量确认</button>
+          <button class="btn" type="button" id="s06i-btn-confirmed">已确认列</button>
+          <button class="btn btn-plain" type="button" id="s06i-btn-flt-clear">清除筛选</button>
+        </div>
+        <div class="s06i-work">
+          <div class="s06i-list table-wrap">
+            <table id="s06i-table">
+              <thead><tr>
+                <th></th><th>模板</th><th>目的港</th><th>PO</th><th>HO</th><th>RANGE</th><th>签约数</th>
+                <th>尺寸</th><th>毛重</th><th>每箱数量</th><th>箱号</th><th>排版</th><th>确认</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="s06i-editor">
+            <div class="s06i-hint" id="s06i-empty">先导入出货通知单，再点一行填写工厂字段。</div>
+            <div id="s06i-editor-form" style="display:none">
+              <div class="s06i-block"><h4>1. 出货通知单自动带出</h4><div class="bd">
+                <div class="s06i-row2">
+                  <div class="s06i-field"><label>PO</label><input id="s06i-f-po" readonly></div>
+                  <div class="s06i-field"><label>HO</label><input id="s06i-f-ho" readonly></div>
+                </div>
+                <div class="s06i-field"><label>RANGE</label><input id="s06i-f-range"></div>
+                <div class="s06i-row2">
+                  <div class="s06i-field"><label>箱唛模板</label>
+                    <select id="s06i-f-tpl">
+                      <option value="">未识别 — 请选择</option>
+                      <option value="AU">AU / MEL（四个面）</option>
+                      <option value="QD">QD 青岛（四个面）</option>
+                      <option value="POL">POL 波兰（两个侧唛）</option>
+                      <option value="USA">USA 美国（两个侧唛）</option>
+                    </select>
+                  </div>
+                  <div class="s06i-field"><label>目的港</label><input id="s06i-f-meta" readonly></div>
+                </div>
+                <div class="s06i-field"><label>签约数</label><input id="s06i-f-qty-order" readonly></div>
+              </div></div>
+              <div class="s06i-block"><h4>2. 工厂手填 <span>必填</span></h4><div class="bd">
+                <div class="s06i-field"><label>DIMMENSIONS（必须 长*宽*高）</label><input id="s06i-f-dims" placeholder="52*36*20"></div>
+                <div class="s06i-row2">
+                  <div class="s06i-field"><label>GROSS WEIGHT</label><input id="s06i-f-gw" placeholder="8.50"></div>
+                  <div class="s06i-field"><label>QUANTITY IN CARTON</label><input id="s06i-f-qty" placeholder="80"></div>
+                </div>
+                <div class="s06i-of">
+                  <div class="s06i-field"><label>CARTON NUMBER</label><input id="s06i-f-from" placeholder="1"></div>
+                  <div class="of">OF</div>
+                  <div class="s06i-field"><label>总箱数</label><input id="s06i-f-total" placeholder="10"></div>
+                </div>
+              </div></div>
+              <div class="s06i-block"><h4>3. 排版和判定结果</h4><div class="bd">
+                <div class="s06i-row2">
+                  <div class="s06i-field"><label>排版</label>
+                    <select id="s06i-f-layout">
+                      <option value="auto">自动（按尺寸）</option>
+                      <option value="2">一开二 · 20×13cm</option>
+                      <option value="4">一开四 · 13.9×9.6cm</option>
+                    </select>
+                  </div>
+                  <div class="s06i-field"><label>判定结果</label><input id="s06i-f-layout-result" readonly></div>
+                </div>
+              </div></div>
+              <div class="s06i-block"><h4>4. 提交箱唛打印信息</h4><div class="bd">
+                <p class="s06i-hint">提交时统一检查格式、重量、纸箱尺寸、数量。通过后出预览，确认 OK 才能导出。</p>
+                <button class="btn" type="button" id="s06i-btn-submit">提交预览</button>
+                <p class="s06i-err" id="s06i-submit-status"></p>
+              </div></div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="card table-card" id="panelHistory" style="display:none">
         <div class="tabs"><span class="on">历史日志</span></div>
@@ -126,9 +219,10 @@
 <script src="lib/html2canvas.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="lib/JsBarcode.all.min.js"></script>
-<script src="crypto-lib.js?v=20261116fix"></script>
-<script src="grid.js?v=20261116fix"></script>
-<script src="s06-mark.js?v=20261116fix"></script>
+<script src="crypto-lib.js?v=20261117imp"></script>
+<script src="grid.js?v=20261117imp"></script>
+<script src="s06-mark.js?v=20261117imp"></script>
+<script src="s06-import.js?v=20261117imp"></script>
 <script>
 let packing = { columns: [], rows: [], history: [] };
 const PACK_KINDS = { a71: "A71-装箱明细", s06: "S06-装箱明细" };
@@ -1494,29 +1588,42 @@ function nowText() {
 }
 function operatorName() { return String(currentUser.username || "").trim().toUpperCase() || "ADMIN"; }
 function setView(name) {
-  if (!currentUser.isAdmin && name !== "pack" && name !== "history") name = "pack";
+  if (!currentUser.isAdmin && name !== "pack" && name !== "history" && name !== "s06import") name = "pack";
   view = name;
   page = 1;
   packing = packingSets[packKind] || packingSets.a71;
   document.getElementById("navUsers").classList.toggle("active", name === "users");
   document.getElementById("navPack").classList.toggle("active", name === "pack" && packKind === "a71");
   const navS06 = document.getElementById("navPackS06");
-  if (navS06) navS06.classList.toggle("active", name === "pack" && packKind === "s06");
+  const navS06List = document.getElementById("navPackS06List");
+  const navS06Imp = document.getElementById("navPackS06Import");
+  const s06On = (name === "pack" && packKind === "s06") || name === "s06import";
+  if (navS06) navS06.classList.toggle("active", s06On);
+  if (navS06List) navS06List.classList.toggle("active", name === "pack" && packKind === "s06");
+  if (navS06Imp) navS06Imp.classList.toggle("active", name === "s06import");
+  const grp = document.getElementById("navS06Group");
+  if (grp) grp.classList.toggle("open", s06On);
   document.getElementById("navHistory").classList.toggle("active", name === "history");
   document.getElementById("panelUsers").style.display = name === "users" ? "block" : "none";
   document.getElementById("panelPack").style.display = name === "pack" ? "block" : "none";
   document.getElementById("panelHistory").style.display = name === "history" ? "block" : "none";
+  const imp = document.getElementById("panelS06Import");
+  if (imp) imp.style.display = name === "s06import" ? "block" : "none";
+  const filterCard = document.getElementById("filters") && document.getElementById("filters").closest(".card");
+  if (filterCard) filterCard.style.display = name === "s06import" ? "none" : "";
   const packLabel = PACK_KINDS[packKind] || "装箱明细";
   const tab = document.getElementById("packTabLabel");
   if (tab) tab.textContent = packLabel;
   document.getElementById("crumb").textContent =
     name === "users" ? "维护 / 账号管控" :
-    name === "history" ? "查询 / 历史日志" : "查询 / " + packLabel;
+    name === "history" ? "查询 / 历史日志" :
+    name === "s06import" ? "S06 / 出货通知单导入模式" : "查询 / " + packLabel;
   renderFilters();
   renderToolbar();
   if (name === "users") renderUsers();
   if (name === "pack") renderPack();
   if (name === "history") renderHistory();
+  if (name === "s06import" && window.S06NoticeImport) S06NoticeImport.bind();
 }
 function renderToolbar() {
   const bar = document.getElementById("toolbar");
@@ -1951,7 +2058,14 @@ function download(name, obj) {
 }
 document.getElementById("navUsers").onclick = (e) => { e.preventDefault(); setView("users"); };
 document.getElementById("navPack").onclick = (e) => { e.preventDefault(); bindPackKind("a71"); };
-document.getElementById("navPackS06").onclick = (e) => { e.preventDefault(); bindPackKind("s06"); };
+document.getElementById("navPackS06").onclick = (e) => {
+  e.preventDefault();
+  const g = document.getElementById("navS06Group");
+  if (g) g.classList.add("open");
+  bindPackKind("s06");
+};
+document.getElementById("navPackS06List").onclick = (e) => { e.preventDefault(); bindPackKind("s06"); };
+document.getElementById("navPackS06Import").onclick = (e) => { e.preventDefault(); packKind = "s06"; setView("s06import"); };
 document.getElementById("navHistory").onclick = (e) => { e.preventDefault(); setView("history"); };
 async function reloadView() {
   show("正在刷新数据包…");
@@ -1993,6 +2107,8 @@ function afterLogin() {
   document.getElementById("navUsers").style.display = currentUser.isAdmin ? "" : "none";
   const allow = allowedPackMenus();
   document.getElementById("navPack").style.display = allow.includes("a71") ? "" : "none";
+  const s06g = document.getElementById("navS06Group");
+  if (s06g) s06g.style.display = allow.includes("s06") ? "" : "none";
   document.getElementById("navPackS06").style.display = allow.includes("s06") ? "" : "none";
   document.getElementById("navHistory").style.display = currentUser.isAdmin ? "" : "none";
   if (allow.length && !allow.includes(packKind)) packKind = allow[0];

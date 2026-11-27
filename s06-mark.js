@@ -330,7 +330,13 @@
 
   function exportPdf(rows, opts) {
     opts = opts || {};
-    var jobs = packingToJobs(rows);
+    return exportFromJobs(packingToJobs(rows), {
+      fileName: (opts && opts.fileName) || fileTitle(rows)
+    });
+  }
+  function exportFromJobs(jobs, opts) {
+    opts = opts || {};
+    jobs = jobs || [];
     var noTpl = jobs.filter(function (j) { return !j.tpl; });
     if (noTpl.length) {
       return Promise.reject(new Error("有 " + noTpl.length + " 条目的港无法识别箱唛模板（AU/QD/POL/USA）。"));
@@ -368,7 +374,7 @@
       function next() {
         if (i >= sheets.length) {
           try {
-            var name = (opts.fileName || fileTitle(rows)) + ".pdf";
+            var name = (opts.fileName || "S06箱唛") + ".pdf";
             pdf.save(name);
             cleanup();
             resolve({ pages: sheets.length, jobs: jobs.length, name: name });
@@ -592,8 +598,11 @@
     requestAnimationFrame(function () { fitOverflow(box); });
   }
   function review(rows, opts) {
+    return reviewJobs(packingToJobs(rows), opts);
+  }
+  function reviewJobs(jobs, opts) {
     opts = opts || {};
-    var jobs = packingToJobs(rows);
+    jobs = jobs || [];
     var result = validateJobs(jobs);
     if (result.errors.length) {
       return Promise.reject(new Error(result.errors.slice(0, 12).join("\n") + (result.errors.length > 12 ? "\n…" : "")));
@@ -647,10 +656,18 @@
 
   global.S06Mark = {
     exportPdf: exportPdf,
+    exportFromJobs: exportFromJobs,
     packingToJobs: packingToJobs,
     detectTemplate: detectTemplate,
     validateJobs: validateJobs,
     review: review,
+    reviewJobs: reviewJobs,
+    layoutOf: layoutOf,
+    withCm: withCm,
+    withKg: withKg,
+    withPcs: withPcs,
+    tailPlan: tailPlan,
+    qtyMismatch: qtyMismatch,
     layoutInfoFromRow: layoutInfoFromRow
   };
 })(window);
